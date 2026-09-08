@@ -4,6 +4,7 @@ import logging
 import platform
 import signal
 import threading
+from types import TracebackType
 from typing import Any, Callable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ class GracefulShutdown:
         print("优雅关闭完成")
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化优雅关闭处理器。"""
         self._stop_event = threading.Event()
         self._cleanup_tasks: List[Tuple[Callable, Tuple[Any, ...], dict]] = []
@@ -40,7 +41,7 @@ class GracefulShutdown:
         返回:
             如果收到关闭信号返回 True，否则返回 False。
         """
-        return self._stop_event.is_set()
+        return bool(self._stop_event.is_set())
 
     def wait(self, timeout: Optional[float] = None) -> bool:
         """等待停止事件被设置或超时。
@@ -51,7 +52,7 @@ class GracefulShutdown:
         返回:
             如果事件被设置返回 True，如果超时返回 False。
         """
-        return self._stop_event.wait(timeout)
+        return bool(self._stop_event.wait(timeout))
 
     def register_cleanup(self, func: Callable, *args: Any, **kwargs: Any) -> None:
         """注册一个在关闭时执行的清理任务。
@@ -154,7 +155,12 @@ class GracefulShutdown:
         """上下文管理器入口。"""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """上下文管理器出口 - 退出时触发清理。"""
         if not self.is_stopped():
             self.stop()

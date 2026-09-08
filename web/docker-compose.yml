@@ -1,0 +1,22 @@
+services:
+  fafu-auto-sign:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+    image: fafu-auto-sign-web:local
+    container_name: fafu-auto-sign-web
+    restart: unless-stopped
+    stop_grace_period: 300s
+    ports:
+      - "8000:8000"
+    environment:
+      FAFU_DATA_DIR: /data
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3

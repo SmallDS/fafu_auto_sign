@@ -1,0 +1,321 @@
+"""FastAPI application and Web API routes."""
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Annotated, AsyncIterator, Literal
+
+from fastapi import Depends, FastAPI, File, Form, Query, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session
+
+from app.database import SessionLocal, get_db, run_migrations
+from app.errors import api_error
+from app.image_store import MAX_UPLOAD_FILES, InvalidImage, store_upload
+from app.legacy import import_legacy_config
+from app.log_reader import read_logs
+from app.models import Image, RunHistory
+from app.paths import FRONTEND_DIST, LOG_DIR, ensure_data_directories
+from app.repository import (
+    configuration_state,
+    get_or_create_settings,
+    image_path,
+    image_to_read,
+    latest_run,
+    run_to_read,
+    settings_to_read,
+    seven_day_stats,
+    update_settings,
+)
+from app.schemas import (
+    HealthResponse,
+    ImagePage,
+    ImageRead,
+    LogPage,
+    RunPage,
+    RunRead,
+    SettingsRead,
+    SettingsUpdate,
+    StatusResponse,
+    WorkerActionResponse,
+)
+from app.worker import WorkerManager
+from fafu_auto_sign.logging_config import setup_logging
+from fafu_auto_sign.services.notification_service import NotificationService
+
+logger = logging.getLogger(__name__)
+worker = WorkerManager()
+DbSession = Annotated[Session, Depends(get_db)]
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    ensure_data_directories()
+    run_migrations()
+    with SessionLocal() as session:
+        get_or_create_settings(session)
+        import_legacy_config(session)
+        settings = get_or_create_settings(session)
+        log_level = settings.log_level
+    setup_logging(log_level, log_dir=str(LOG_DIR))
+    worker.start()
+    try:
+        yield
+    finally:
+        worker.stop()
+
+
+app = FastAPI(title="FAFU Auto Sign Web", version="1.0.0", lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    fields: dict[str, str] = {}
+    for error in exc.errors():
+        location = error.get("loc", ())
+        key = str(location[-1]) if location else "request"
+        fields[key] = str(error.get("msg", "输入无效"))
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": {"code": "VALIDATION_ERROR", "message": "请求参数校验失败", "fields": fields}
+        },
+    )
+
+
+@app.get("/api/health", response_model=HealthResponse)
+def health(session: DbSession) -> HealthResponse:
+    session.execute(text("SELECT 1"))
+    settings = get_or_create_settings(session)
+    configured, _ = configuration_state(session, settings)
+    return HealthResponse(worker_state=worker.snapshot()["state"], configured=configured)
+
+
+@app.get("/api/settings", response_model=SettingsRead)
+def get_settings(session: DbSession) -> SettingsRead:
+    return settings_to_read(session, get_or_create_settings(session))
+
+
+@app.put("/api/settings", response_model=SettingsRead)
+def put_settings(payload: SettingsUpdate, session: DbSession) -> SettingsRead:
+    try:
+        settings = update_settings(session, payload)
+    except ValueError as exc:
+        session.rollback()
+        raise api_error(422, "VALIDATION_ERROR", "配置校验失败", {"settings": str(exc)}) from exc
+    worker.notify_configuration_changed()
+    return settings_to_read(session, settings)
+
+
+@app.get("/api/status", response_model=StatusResponse)
+def status(session: DbSession) -> StatusResponse:
+    settings = get_or_create_settings(session)
+    configured, missing = configuration_state(session, settings)
+    snapshot = worker.snapshot()
+    latest = latest_run(session)
+    return StatusResponse(
+        configured=configured,
+        worker_state=snapshot["state"],
+        last_check_at=snapshot["last_check_at"],
+        next_check_at=snapshot["next_check_at"],
+        last_error=latest.error if latest else None,
+        recent_run=run_to_read(latest) if latest else None,
+        stats_7d=seven_day_stats(session),
+    )
+
+
+@app.post("/api/worker/pause", response_model=WorkerActionResponse)
+def pause_worker(session: DbSession) -> WorkerActionResponse:
+    settings = get_or_create_settings(session)
+    settings.worker_enabled = False
+    settings.config_version += 1
+    session.commit()
+    worker.notify_configuration_changed()
+    state = worker.snapshot()["state"]
+    return WorkerActionResponse(state=state, message="当前任务结束后将暂停自动检查")
+
+
+@app.post("/api/worker/resume", response_model=WorkerActionResponse)
+def resume_worker(session: DbSession) -> WorkerActionResponse:
+    settings = get_or_create_settings(session)
+    configured, missing = configuration_state(session, settings)
+    if not configured:
+        raise api_error(
+            409, "CONFIGURATION_INCOMPLETE", "配置不完整，无法恢复", {"missing": ",".join(missing)}
+        )
+    settings.worker_enabled = True
+    settings.config_version += 1
+    session.commit()
+    worker.notify_configuration_changed()
+    return WorkerActionResponse(state="idle", message="已恢复自动检查")
+
+
+@app.post("/api/worker/run-now", response_model=WorkerActionResponse)
+def run_now(session: DbSession) -> WorkerActionResponse:
+    configured, missing = configuration_state(session)
+    if not configured:
+        raise api_error(
+            409, "CONFIGURATION_INCOMPLETE", "配置不完整，无法执行", {"missing": ",".join(missing)}
+        )
+    if not worker.request_run_now():
+        raise api_error(409, "WORKER_BUSY", "已有签到任务正在执行")
+    return WorkerActionResponse(state="executing", message="已提交立即检查")
+
+
+@app.get("/api/images", response_model=ImagePage)
+def list_images(
+    session: DbSession,
+    category: Literal["library", "latest"] | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> ImagePage:
+    count_query = select(func.count(Image.id))
+    images_query = select(Image)
+    if category:
+        count_query = count_query.where(Image.purpose == category)
+        images_query = images_query.where(Image.purpose == category)
+    total = session.scalar(count_query) or 0
+    rows = session.scalars(
+        images_query.order_by(Image.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    return ImagePage(
+        items=[image_to_read(row) for row in rows], total=total, page=page, page_size=page_size
+    )
+
+
+@app.post("/api/images", response_model=list[ImageRead], status_code=201)
+async def upload_images(
+    session: DbSession,
+    files: Annotated[list[UploadFile], File(...)],
+    category: Annotated[Literal["library", "latest"], Form()] = "library",
+) -> list[ImageRead]:
+    if len(files) > MAX_UPLOAD_FILES:
+        raise api_error(413, "TOO_MANY_FILES", "每次最多上传 10 张图片")
+    created: list[Image] = []
+    try:
+        for upload in files:
+            created.append(await store_upload(session, upload, category, commit=False))
+        session.commit()
+    except InvalidImage as exc:
+        session.rollback()
+        for image in created:
+            image_path(image).unlink(missing_ok=True)
+        raise api_error(422, "INVALID_IMAGE", str(exc)) from exc
+    except Exception:
+        session.rollback()
+        for image in created:
+            image_path(image).unlink(missing_ok=True)
+        raise
+    worker.notify_configuration_changed()
+    return [image_to_read(row) for row in created]
+
+
+@app.get("/api/images/{image_id}", response_class=FileResponse)
+def get_image(image_id: str, session: DbSession) -> FileResponse:
+    image = session.get(Image, image_id)
+    if image is None:
+        raise api_error(404, "IMAGE_NOT_FOUND", "图片不存在")
+    path = image_path(image)
+    if not path.is_file():
+        raise api_error(404, "IMAGE_FILE_MISSING", "图片文件不存在")
+    return FileResponse(path, media_type=image.mime_type, filename=image.original_name)
+
+
+@app.delete("/api/images/{image_id}", status_code=204)
+def delete_image(image_id: str, session: DbSession) -> None:
+    image = session.get(Image, image_id)
+    if image is None:
+        raise api_error(404, "IMAGE_NOT_FOUND", "图片不存在")
+    settings = get_or_create_settings(session)
+    if settings.current_image_id == image_id:
+        raise api_error(409, "IMAGE_IN_USE", "当前单图正在使用，不能删除")
+    path = image_path(image)
+    session.delete(image)
+    session.commit()
+    path.unlink(missing_ok=True)
+    worker.notify_configuration_changed()
+
+
+@app.get("/api/runs", response_model=RunPage)
+def list_runs(
+    session: DbSession,
+    result: str | None = None,
+    trigger: str | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> RunPage:
+    query = select(RunHistory)
+    count_query = select(func.count(RunHistory.id))
+    if result:
+        query = query.where(RunHistory.status == result)
+        count_query = count_query.where(RunHistory.status == result)
+    if trigger:
+        query = query.where(RunHistory.trigger == trigger)
+        count_query = count_query.where(RunHistory.trigger == trigger)
+    total = session.scalar(count_query) or 0
+    rows = session.scalars(
+        query.order_by(RunHistory.started_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    ).all()
+    return RunPage(
+        items=[run_to_read(row) for row in rows], total=total, page=page, page_size=page_size
+    )
+
+
+@app.get("/api/runs/{run_id}", response_model=RunRead)
+def get_run(run_id: int, session: DbSession) -> RunRead:
+    row = session.get(RunHistory, run_id)
+    if row is None:
+        raise api_error(404, "RUN_NOT_FOUND", "运行记录不存在")
+    return run_to_read(row)
+
+
+@app.get("/api/logs", response_model=LogPage)
+def logs(
+    cursor: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+    level: str | None = None,
+) -> LogPage:
+    return read_logs(cursor, limit, level)
+
+
+@app.post("/api/notifications/test", response_model=WorkerActionResponse)
+def test_notification(session: DbSession) -> WorkerActionResponse:
+    settings = get_or_create_settings(session)
+    if not settings.notification_enabled or not settings.serverchan_key:
+        raise api_error(409, "NOTIFICATION_NOT_CONFIGURED", "请先启用通知并配置 SendKey")
+    config = SimpleNamespace(notification_enabled=True, serverchan_key=settings.serverchan_key)
+    accepted = NotificationService(config).notify("FAFU 签到助手测试", "Web 管理台通知配置有效")  # type: ignore[arg-type]
+    return WorkerActionResponse(
+        state=worker.snapshot()["state"], message="测试通知已提交" if accepted else "测试通知未提交"
+    )
+
+
+if (FRONTEND_DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+
+@app.get("/{full_path:path}", include_in_schema=False, response_model=None)
+def frontend(full_path: str) -> FileResponse | JSONResponse:
+    if full_path == "api" or full_path.startswith("api/"):
+        return JSONResponse(
+            status_code=404,
+            content={"detail": {"code": "NOT_FOUND", "message": "API 接口不存在"}},
+        )
+    index = FRONTEND_DIST / "index.html"
+    requested = (FRONTEND_DIST / full_path).resolve()
+    if full_path and FRONTEND_DIST.resolve() in requested.parents and requested.is_file():
+        return FileResponse(requested)
+    if index.is_file():
+        return FileResponse(index)
+    return JSONResponse(
+        status_code=404,
+        content={"detail": {"code": "FRONTEND_NOT_BUILT", "message": "前端尚未构建"}},
+    )

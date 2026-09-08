@@ -34,6 +34,16 @@
 
 ### 🛠️ 快速开始
 
+#### Docker Web 管理台（推荐）
+
+项目提供单容器 Web 管理台，可在浏览器中维护配置、图片，查看运行状态、历史和日志。配置与运行数据持久化到 `web/data`。
+
+```powershell
+docker compose -f web/docker-compose.yml up -d --build
+```
+
+启动后访问 <http://localhost:8000>。管理台无登录鉴权，Token 与 Server酱 SendKey 以明文保存在 SQLite 中，**只能在可信局域网使用，不要直接暴露到公网**。完整部署、迁移和运维说明见 [`web/README.md`](web/README.md)。
+
 #### 1. 环境准备
 
 请确保你的电脑或服务器已安装 Python 3.10 或更高版本。

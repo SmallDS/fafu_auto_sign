@@ -17,6 +17,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # 预处理：创建一个假的 fafu_auto_sign 包结构，避免循环导入
+_MODULES_TO_RESTORE = (
+    "fafu_auto_sign",
+    "fafu_auto_sign.services",
+    "fafu_auto_sign.services.notification_service",
+    "fafu_auto_sign.config",
+    "serverchan_sdk",
+)
+_original_modules = {name: sys.modules.get(name) for name in _MODULES_TO_RESTORE}
+
 # 首先检查是否已存在，如果存在则移除
 if "fafu_auto_sign" in sys.modules:
     del sys.modules["fafu_auto_sign"]
@@ -74,6 +83,13 @@ sys.modules["serverchan_sdk"] = serverchan_sdk
 # 加载 notification_service
 spec.loader.exec_module(notification_module)
 NotificationService = notification_module.NotificationService
+
+# 避免本测试的临时模块污染其他测试文件的导入状态。
+for _module_name, _original_module in _original_modules.items():
+    if _original_module is None:
+        sys.modules.pop(_module_name, None)
+    else:
+        sys.modules[_module_name] = _original_module
 
 
 @pytest.fixture

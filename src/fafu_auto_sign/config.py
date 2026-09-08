@@ -138,11 +138,11 @@ class AppConfig(BaseSettings):
     @field_validator("serverchan_key")
     @classmethod
     def validate_serverchan_key(cls, v: Optional[str]) -> Optional[str]:
-        """验证 Server酱 SendKey 格式（以 SCT 或 sctp 开头）。"""
+        """验证 Server酱 SendKey 格式（以 SCT、SC3 或 sctp 开头）。"""
         if v is not None:
-            if not v.startswith(("SCT", "sctp")):
+            if not v.startswith(("SCT", "SC3", "sctp")):
                 raise ValueError(
-                    f"Server酱 SendKey 必须以 'SCT' 或 'sctp' 开头，当前值: {v[:20]}..."
+                    f"Server酱 SendKey 必须以 'SCT'、'SC3' 或 'sctp' 开头，当前值: {v[:20]}..."
                 )
         return v
 

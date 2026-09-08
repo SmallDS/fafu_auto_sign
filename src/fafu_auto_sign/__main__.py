@@ -6,7 +6,7 @@ import sys
 from fafu_auto_sign.main import run
 
 
-def main():
+def main() -> None:
     """主入口点，包含命令行参数解析。"""
     parser = argparse.ArgumentParser(description="FAFU自动签到助手")
     parser.add_argument(

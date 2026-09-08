@@ -62,6 +62,12 @@ class TestAppConfig:
             AppConfig(user_token="2_TEST_TOKEN", log_level="INVALID")
         assert "日志级别必须是" in str(exc_info.value)
 
+    @pytest.mark.parametrize("sendkey", ["SCT_test", "SC3_test", "sctp_test"])
+    def test_serverchan_key_supported_prefixes(self, sendkey: str):
+        """测试网页和 CLI 接受一致的 Server酱 SendKey 前缀。"""
+        config = AppConfig(user_token="2_TEST_TOKEN", serverchan_key=sendkey)
+        assert config.serverchan_key == sendkey
+
     def test_jitter_validation(self):
         """测试抖动验证。"""
         # 有效的抖动值

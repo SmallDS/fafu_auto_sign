@@ -9,7 +9,7 @@ import threading
 import time
 from typing import Any, Optional
 
-from serverchan_sdk import sc_send
+from serverchan_sdk import sc_send  # type: ignore[import-untyped]
 
 from fafu_auto_sign.config import AppConfig
 
@@ -163,7 +163,7 @@ class NotificationService:
             result_container: list[Any] = []
             exception_container: list[Exception] = []
 
-            def do_send():
+            def do_send() -> None:
                 try:
                     response = sc_send(sendkey, title, desp=content)
                     result_container.append(response)
