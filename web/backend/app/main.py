@@ -16,10 +16,17 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db, run_migrations
-from app.errors import api_error
+from app.errors import ConfigurationIncomplete, api_error
 from app.image_store import MAX_UPLOAD_FILES, InvalidImage, store_upload
 from app.legacy import import_legacy_config
 from app.log_reader import read_logs
+from app.manual_sign import (
+    ExecutionBusy,
+    ManualSignService,
+    TaskDetailsUnavailable,
+    TaskNoLongerActive,
+    UpstreamUnavailable,
+)
 from app.models import Image, RunHistory
 from app.paths import FRONTEND_DIST, LOG_DIR, ensure_data_directories
 from app.repository import (
@@ -42,6 +49,10 @@ from app.schemas import (
     RunRead,
     SettingsRead,
     SettingsUpdate,
+    SignTaskDetailsRead,
+    SignTaskPage,
+    SignTaskRead,
+    SignTaskSubmit,
     StatusResponse,
     WorkerActionResponse,
 )
@@ -51,6 +62,7 @@ from fafu_auto_sign.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 worker = WorkerManager()
+manual_sign = ManualSignService(worker)
 DbSession = Annotated[Session, Depends(get_db)]
 
 
@@ -166,6 +178,88 @@ def run_now(session: DbSession) -> WorkerActionResponse:
     if not worker.request_run_now():
         raise api_error(409, "WORKER_BUSY", "已有签到任务正在执行")
     return WorkerActionResponse(state="executing", message="已提交立即检查")
+
+
+@app.get("/api/sign-tasks", response_model=SignTaskPage)
+def list_sign_tasks(
+    session: DbSession,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> SignTaskPage:
+    try:
+        result = manual_sign.list_tasks(session, page, page_size)
+    except ConfigurationIncomplete as exc:
+        raise api_error(409, "CONFIGURATION_INCOMPLETE", "请先配置 Token") from exc
+    except ExecutionBusy as exc:
+        raise api_error(409, "WORKER_BUSY", "已有 FAFU 操作正在执行") from exc
+    except UpstreamUnavailable as exc:
+        raise api_error(502, "FAFU_UPSTREAM_ERROR", "无法读取 FAFU 签到任务") from exc
+    return SignTaskPage(
+        items=[
+            SignTaskRead(
+                id=item.id,
+                name=item.name,
+                begin_time=item.begin_time,
+                end_time=item.end_time,
+            )
+            for item in result.items
+        ],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+        has_more=result.has_more,
+    )
+
+
+@app.get("/api/sign-tasks/{task_id}", response_model=SignTaskDetailsRead)
+def get_sign_task_details(task_id: int, session: DbSession) -> SignTaskDetailsRead:
+    try:
+        details = manual_sign.get_details(session, task_id)
+    except ConfigurationIncomplete as exc:
+        raise api_error(409, "CONFIGURATION_INCOMPLETE", "请先配置 Token") from exc
+    except TaskDetailsUnavailable as exc:
+        raise api_error(404, "TASK_DETAILS_UNAVAILABLE", "任务详情不可用") from exc
+    except ExecutionBusy as exc:
+        raise api_error(409, "WORKER_BUSY", "已有 FAFU 操作正在执行") from exc
+    except UpstreamUnavailable as exc:
+        raise api_error(502, "FAFU_UPSTREAM_ERROR", "无法读取 FAFU 任务详情") from exc
+    return SignTaskDetailsRead(
+        task_id=details.task_id,
+        position_id=details.position_id,
+        base_lng=details.base_lng,
+        base_lat=details.base_lat,
+        position_name=details.position_name,
+    )
+
+
+@app.post("/api/sign-tasks/{task_id}/submit", response_model=RunRead)
+def submit_sign_task(
+    task_id: int,
+    payload: SignTaskSubmit,
+    session: DbSession,
+) -> RunRead:
+    try:
+        row = manual_sign.submit(
+            session,
+            task_id=task_id,
+            source_page=payload.source_page,
+            page_size=payload.page_size,
+        )
+    except ConfigurationIncomplete as exc:
+        raise api_error(409, "CONFIGURATION_INCOMPLETE", "完整签到配置尚未就绪") from exc
+    except ExecutionBusy as exc:
+        raise api_error(409, "WORKER_BUSY", "已有签到任务正在执行") from exc
+    except TaskNoLongerActive as exc:
+        raise api_error(
+            409,
+            "TASK_NO_LONGER_ACTIVE",
+            "任务已失效或不在签到时间内",
+            {"run_id": str(exc.run_id)},
+        ) from exc
+    except UpstreamUnavailable as exc:
+        fields = {"run_id": str(exc.run_id)} if exc.run_id is not None else None
+        raise api_error(502, "FAFU_UPSTREAM_ERROR", "FAFU 签到请求失败", fields) from exc
+    return run_to_read(row)
 
 
 @app.get("/api/images", response_model=ImagePage)
@@ -286,18 +380,36 @@ def logs(
     return read_logs(cursor, limit, level)
 
 
-@app.post("/api/notifications/test", response_model=WorkerActionResponse)
-def test_notification(session: DbSession) -> WorkerActionResponse:
+@app.post("/api/notifications/wechat-test/test", response_model=WorkerActionResponse)
+def test_wechat_notification(session: DbSession) -> WorkerActionResponse:
     settings = get_or_create_settings(session)
-    if not settings.notification_enabled or not settings.serverchan_key:
-        raise api_error(409, "NOTIFICATION_NOT_CONFIGURED", "请先启用通知并配置 SendKey")
-    config = SimpleNamespace(notification_enabled=True, serverchan_key=settings.serverchan_key)
-    accepted = NotificationService(config).notify("FAFU 签到助手测试", "Web 管理台通知配置有效")  # type: ignore[arg-type]
-    return WorkerActionResponse(
-        state=worker.snapshot()["state"], message="测试通知已提交" if accepted else "测试通知未提交"
+    configured = all((
+        settings.wechat_test_app_id,
+        settings.wechat_test_app_secret,
+        settings.wechat_test_template_id,
+        settings.wechat_test_openid,
+    ))
+    if not settings.wechat_test_enabled or not configured:
+        raise api_error(
+            409,
+            "WECHAT_TEST_NOT_CONFIGURED",
+            "请先启用并完整配置微信公众号接口测试号",
+        )
+    config = SimpleNamespace(
+        wechat_test_enabled=True,
+        wechat_test_app_id=settings.wechat_test_app_id,
+        wechat_test_app_secret=settings.wechat_test_app_secret,
+        wechat_test_template_id=settings.wechat_test_template_id,
+        wechat_test_openid=settings.wechat_test_openid,
     )
-
-
+    accepted = NotificationService(config).notify(
+        "FAFU 签到助手测试",
+        "Web 管理台微信公众号接口测试号配置已提交测试",
+    )  # type: ignore[arg-type]
+    return WorkerActionResponse(
+        state=worker.snapshot()["state"],
+        message="测试号通知已提交" if accepted else "测试号通知未提交",
+    )
 if (FRONTEND_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 

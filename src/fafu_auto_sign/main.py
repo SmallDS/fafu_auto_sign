@@ -23,7 +23,7 @@ def run(config_path: str = "config.json") -> None:
     config = load_config(config_path)
 
     notification_service = None
-    if config.notification_enabled:
+    if config.wechat_test_enabled:
         notification_service = NotificationService(config)
 
     setup_logging(config.log_level, notification_service=notification_service)

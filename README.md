@@ -24,7 +24,7 @@
 
 ✅ **健壮的重试机制**：客户端内置指数退避重试策略，自动处理网络抖动和临时服务不可用。
 
-✅ **微信推送通知**：集成 Server酱，支持签到成功/失败实时推送到微信，5分钟内同类型消息自动去重。
+✅ **微信推送通知**：支持微信公众号接口测试号模板消息，签到成功/失败实时推送，5分钟内同类型消息自动去重。
 
 ### 🚨 免责声明 (Disclaimer)
 
@@ -42,7 +42,7 @@
 docker compose -f web/docker-compose.yml up -d --build
 ```
 
-启动后访问 <http://localhost:8000>。管理台无登录鉴权，Token 与 Server酱 SendKey 以明文保存在 SQLite 中，**只能在可信局域网使用，不要直接暴露到公网**。完整部署、迁移和运维说明见 [`web/README.md`](web/README.md)。
+启动后访问 <http://localhost:8000>。管理台无登录鉴权，Token、测试号 AppSecret 与 OpenID 以明文保存在 SQLite 中，**只能在可信局域网使用，不要直接暴露到公网**。完整部署、迁移和运维说明见 [`web/README.md`](web/README.md)。
 
 #### 1. 环境准备
 
@@ -105,8 +105,11 @@ export FAFU_JITTER="0.00005"
 export FAFU_IMAGE_PATH="dorm.jpg"
 export FAFU_BASE_URL="http://stuhtapi.fafu.edu.cn"
 export FAFU_HEARTBEAT_INTERVAL="900"
-export FAFU_NOTIFICATION_ENABLED="false"
-export FAFU_SERVERCHAN_KEY=""
+export FAFU_WECHAT_TEST_ENABLED="false"
+export FAFU_WECHAT_TEST_APP_ID=""
+export FAFU_WECHAT_TEST_APP_SECRET=""
+export FAFU_WECHAT_TEST_TEMPLATE_ID=""
+export FAFU_WECHAT_TEST_OPENID=""
 export FAFU_IMAGE_DIR="./photos/"  # 图片目录路径（启用随机选择）
 export FAFU_TASK_KEYWORDS='["晚归"]'  # 任务关键词列表（JSON格式）
 export FAFU_LATEST_IMAGE_DIR=""  # 最新图片目录路径
@@ -128,8 +131,11 @@ $env:FAFU_USER_TOKEN="2_YOUR_TOKEN_HERE"
 | `base_url` | ❌ | `http://stuhtapi.fafu.edu.cn` | API 基础 URL |
 | `heartbeat_interval` | ❌ | `900` | 心跳间隔秒数（默认 15 分钟） |
 | `log_level` | ❌ | `INFO` | 日志级别（DEBUG/INFO/WARNING/ERROR/CRITICAL） |
-| `notification_enabled` | ❌ | `false` | 是否启用微信推送通知 |
-| `serverchan_key` | ❌ | - | Server酱 SendKey（启用通知时必需）|
+| `wechat_test_enabled` | ❌ | `false` | 是否启用微信公众号接口测试号通知 |
+| `wechat_test_app_id` | ❌ | - | 测试号 AppID |
+| `wechat_test_app_secret` | ❌ | - | 测试号 AppSecret |
+| `wechat_test_template_id` | ❌ | - | 测试号模板 ID |
+| `wechat_test_openid` | ❌ | - | 接收人的 OpenID |
 | `task_keywords` | ❌ | `["晚归"]` | 任务关键词列表，用于识别需要签到的任务（JSON 数组格式） |
 | `latest_image_dir` | ❌ | - | 最新图片目录路径，设置后将使用目录中最新修改的图片,图片使用后自动删除 |
 💡 **配置示例**：
@@ -162,38 +168,19 @@ $env:FAFU_USER_TOKEN="2_YOUR_TOKEN_HERE"
 - 可自定义多个关键词，如 `["晚归", "查寝", "点名"]`
 - 只要任务名称包含任意一个关键词，就会被识别为待签到任务
 
-#### 微信推送通知配置（可选）
+#### 微信公众号接口测试号通知（可选）
 
-本项目支持通过 [Server酱](https://sct.ftqq.com/) 将签到状态实时推送到微信。
+可在 Web 设置页或 JSON/环境变量中独立启用。请在微信公众平台测试号后台创建内容完全匹配的模板：
 
-**功能特点：**
-- 📱 签到成功/失败实时微信通知
-- 🔔 Token过期、系统时间错误等紧急情况即时告警
-- 🛡️ 5分钟内同类型消息自动去重，防止骚扰
-- ⚙️ 配置开关控制，随时启用/禁用
+```text
+{{first.DATA}}
+任务：{{keyword1.DATA}}
+状态：{{keyword2.DATA}}
+时间：{{keyword3.DATA}}
+{{remark.DATA}}
+```
 
-**配置步骤：**
-
-1. **获取 SendKey**
-   - 访问 https://sct.ftqq.com/
-   - 微信扫码登录
-   - 复制 SendKey（格式如 `SCTxxxxx` 或 `SC3xxxxx`）
-
-2. **修改配置文件**
-   ```json
-   {
-     "user_token": "2_YOUR_TOKEN_HERE",
-     "notification_enabled": true,
-     "serverchan_key": "SCT1234567890abcdef"
-   }
-   ```
-
-3. **或使用环境变量**
-   ```bash
-   export FAFU_NOTIFICATION_ENABLED="true"
-   export FAFU_SERVERCHAN_KEY="SCT1234567890abcdef"
-   ```
-
+启用前必须同时配置 AppID、AppSecret、模板 ID 和接收人的 OpenID。AppSecret、OpenID 和 access_token 不会出现在 API 响应或错误日志中；但 AppSecret/OpenID 与其他运行密钥一样以明文持久化，请勿提交配置文件或数据库。
 #### 6. 运行
 
 ```bash

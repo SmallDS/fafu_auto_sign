@@ -17,7 +17,11 @@ import requests
 
 from fafu_auto_sign.client import FAFUClient
 from fafu_auto_sign.config import AppConfig
-from fafu_auto_sign.services.task_service import TaskDetails, TaskService
+from fafu_auto_sign.services.task_service import (
+    TaskDetails,
+    TaskDetailsFetchError,
+    TaskService,
+)
 
 
 @pytest.fixture
@@ -728,3 +732,70 @@ class TestGetTaskDetails:
             assert isinstance(result.base_lat, float)
             assert result.base_lng == 118.23672800
             assert result.base_lat == 25.07728900
+
+
+class TestPendingTaskPage:
+    def test_reads_real_upstream_page_without_keyword_filtering(self, task_service) -> None:
+        response = MagicMock()
+        response.json.return_value = {
+            "records": [
+                {
+                    "id": 501,
+                    "name": "课堂签到",
+                    "beginTime": "1700000000000",
+                    "endTime": 1700003600000,
+                }
+            ],
+            "total": 41,
+        }
+
+        with patch.object(task_service.client, "post", return_value=response) as post:
+            page = task_service.get_pending_task_page(2, 20)
+
+        post.assert_called_once_with(
+            "/health-api/sign_in/student/my/page?rows=20&pageNum=2&signState=0",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert page.items[0].id == "501"
+        assert page.items[0].name == "课堂签到"
+        assert page.items[0].begin_time == 1700000000000
+        assert page.total == 41
+        assert page.has_more is True
+
+    def test_invalid_total_is_not_invented(self, task_service) -> None:
+        response = MagicMock()
+        response.json.return_value = {
+            "records": [
+                {"id": index, "name": "任务", "beginTime": 1, "endTime": 2} for index in range(2)
+            ],
+            "total": "2",
+        }
+
+        with patch.object(task_service.client, "post", return_value=response):
+            page = task_service.get_pending_task_page(1, 2)
+
+        assert page.total is None
+        assert page.has_more is True
+
+
+def test_strict_details_distinguishes_upstream_failure(task_service) -> None:
+    with patch.object(task_service.client, "get", side_effect=RuntimeError("network")):
+        with pytest.raises(TaskDetailsFetchError):
+            task_service.get_task_details_strict(123)
+        assert task_service.get_task_details(123) is None
+
+
+def test_unknown_total_uses_raw_full_page_for_has_more(task_service) -> None:
+    response = MagicMock()
+    response.json.return_value = {
+        "records": [
+            {"id": 1, "name": "有效", "beginTime": 1, "endTime": 2},
+            {"name": "缺少ID", "beginTime": "bad", "endTime": 2},
+        ]
+    }
+    with patch.object(task_service.client, "post", return_value=response):
+        page = task_service.get_pending_task_page(1, 2)
+
+    assert len(page.items) == 1
+    assert page.total is None
+    assert page.has_more is True

@@ -1,13 +1,16 @@
 {
   "user_token": "2_YOUR_TOKEN_HERE",
-  "jitter": 5e-05,
+  "jitter": 5E-05,
   "image_path": "dorm.jpg",
   "image_dir": null,
   "base_url": "http://stuhtapi.fafu.edu.cn",
   "heartbeat_interval": 900,
   "log_level": "INFO",
-  "notification_enabled": false,
-  "serverchan_key": null,
+  "wechat_test_enabled": false,
+  "wechat_test_app_id": null,
+  "wechat_test_app_secret": null,
+  "wechat_test_template_id": null,
+  "wechat_test_openid": null,
   "task_keywords": [
     "晚归"
   ],

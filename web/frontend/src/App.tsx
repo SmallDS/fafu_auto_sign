@@ -8,6 +8,7 @@ import { HistoryPage } from './pages/HistoryPage';
 import { ImagesPage } from './pages/ImagesPage';
 import { LogsPage } from './pages/LogsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { SignTasksPage } from './pages/SignTasksPage';
 
 export default function App(): ReactNode {
   return (
@@ -35,6 +36,7 @@ export default function App(): ReactNode {
           <Routes>
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/sign-tasks" element={<SignTasksPage />} />
             <Route path="/images" element={<ImagesPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/logs" element={<LogsPage />} />

@@ -10,6 +10,8 @@ import type {
   RunTrigger,
   Settings,
   SettingsUpdate,
+  SignTaskDetails,
+  SignTaskPage,
   StatusResponse,
 } from '../types/api';
 
@@ -85,7 +87,15 @@ export const api = {
   pauseWorker: (): Promise<ActionResponse> => request('/worker/pause', { method: 'POST' }),
   resumeWorker: (): Promise<ActionResponse> => request('/worker/resume', { method: 'POST' }),
   runNow: (): Promise<ActionResponse> => request('/worker/run-now', { method: 'POST' }),
-  listImages: (page = 1, pageSize = 24, category?: ImageCategory): Promise<PageResponse<ImageRecord>> =>
+  listSignTasks: (page = 1, pageSize = 20): Promise<SignTaskPage> =>
+    request(`/sign-tasks${buildQuery({ page, page_size: pageSize })}`),
+  getSignTask: (id: string): Promise<SignTaskDetails> =>
+    request(`/sign-tasks/${encodeURIComponent(id)}`),
+  submitSignTask: (id: string, sourcePage: number, pageSize: number): Promise<RunRecord> =>
+    request(`/sign-tasks/${encodeURIComponent(id)}/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ source_page: sourcePage, page_size: pageSize }),
+    }),  listImages: (page = 1, pageSize = 24, category?: ImageCategory): Promise<PageResponse<ImageRecord>> =>
     request(`/images${buildQuery({ page, page_size: pageSize, category })}`),
   uploadImages: (files: File[], category: ImageCategory): Promise<PageResponse<ImageRecord> | ImageRecord[]> => {
     const formData = new FormData();
@@ -105,5 +115,6 @@ export const api = {
   getRun: (id: number): Promise<RunRecord> => request(`/runs/${id}`),
   getLogs: (cursor?: string | number | null, limit = 200, level?: string): Promise<LogsResponse> =>
     request(`/logs${buildQuery({ cursor, limit, level })}`),
-  testNotification: (): Promise<ActionResponse> => request('/notifications/test', { method: 'POST' }),
+  testWechatNotification: (): Promise<ActionResponse> =>
+    request('/notifications/wechat-test/test', { method: 'POST' }),
 };

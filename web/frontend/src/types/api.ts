@@ -10,12 +10,16 @@ export interface Settings {
   version: number;
   has_user_token: boolean;
   user_token_masked: string | null;
-  has_serverchan_key: boolean;
-  serverchan_key_masked: string | null;
+  wechat_test_enabled: boolean;
+  wechat_test_app_id: string | null;
+  wechat_test_template_id: string | null;
+  has_wechat_test_app_secret: boolean;
+  wechat_test_app_secret_masked: string | null;
+  has_wechat_test_openid: boolean;
+  wechat_test_openid_masked: string | null;
   jitter: number;
   heartbeat_interval: number;
   log_level: LogLevel;
-  notification_enabled: boolean;
   task_keywords: string[];
   image_mode: ImageMode;
   selected_image_id: string | null;
@@ -24,13 +28,17 @@ export interface Settings {
 
 export interface SettingsUpdate {
   user_token?: string;
-  serverchan_key?: string;
   clear_user_token?: boolean;
-  clear_serverchan_key?: boolean;
+  wechat_test_enabled?: boolean;
+  wechat_test_app_id?: string;
+  wechat_test_app_secret?: string;
+  clear_wechat_test_app_secret?: boolean;
+  wechat_test_template_id?: string;
+  wechat_test_openid?: string;
+  clear_wechat_test_openid?: boolean;
   jitter?: number;
   heartbeat_interval?: number;
   log_level?: LogLevel;
-  notification_enabled?: boolean;
   task_keywords?: string[];
   image_mode?: ImageMode;
   selected_image_id?: string | null;
@@ -94,6 +102,28 @@ export interface PageResponse<T> {
   total: number;
   page: number;
   page_size: number;
+}
+export interface SignTask {
+  id: string;
+  name: string;
+  begin_time: number;
+  end_time: number;
+}
+
+export interface SignTaskPage {
+  items: SignTask[];
+  total: number | null;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+}
+
+export interface SignTaskDetails {
+  task_id: number;
+  position_id: number;
+  base_lng: number;
+  base_lat: number;
+  position_name: string;
 }
 
 export interface LogEntry {

@@ -23,7 +23,7 @@ fafu_auto_sign/
 │       ├── task_service.py      # 任务识别与管理
 │       ├── sign_service.py      # 签到提交（GPS抖动）
 │       ├── upload_service.py    # 图片上传（七牛云）
-│       └── notification_service.py  # 微信推送通知（Server酱）
+│       └── notification_service.py  # 微信测试号模板消息通知
 ├── tests/                       # 测试套件
 ├── pyproject.toml               # 项目元数据与依赖
 ├── config.json                  # 用户配置文件（本地）
@@ -48,7 +48,7 @@ fafu_auto_sign/
 | **修改主循环** | `main.py` | `run()` 函数 |
 | **添加测试** | `tests/` | 使用 `conftest.py` fixtures |
 | **添加通知功能** | `services/notification_service.py` | `NotificationService` 类 |
-| **修改通知配置** | `config.py` | `notification_enabled`, `serverchan_key` |
+| **修改通知配置** | `config.py` | 微信测试号通知开关与凭据字段 |
 | **修改日志通知** | `logging_config.py` | `NotificationHandler` |
 | **集成通知流程** | `main.py`, `client.py` | 初始化 `NotificationService`, 致命错误前发送通知 |
 
@@ -185,26 +185,17 @@ nohup python -m fafu_auto_sign > sign.log 2>&1 &
 ## 微信推送通知
 
 ### 配置说明
-- `notification_enabled`: 是否启用微信推送（默认 false）
-- `serverchan_key`: Server酱 SendKey（启用时必需）
+- `wechat_test_enabled`: 是否启用微信公众号接口测试号通知
+- `wechat_test_app_id`、`wechat_test_app_secret`、`wechat_test_template_id`、`wechat_test_openid`: 测试号凭据
 
 ### 功能特点
 - 签到成功/失败实时微信通知
 - Token过期、时间错误等紧急情况即时告警
 - 5分钟内同类型消息自动去重
 
-### 获取 SendKey
-1. 访问 https://sct.ftqq.com/
-2. 微信扫码登录
-3. 复制 SendKey（格式 SCTxxxxx）
+### 微信测试号说明
 
-### 使用示例
-```json
-{
-  "notification_enabled": true,
-  "serverchan_key": "SCT1234567890"
-}
-```
+通知通过微信公众平台接口测试号模板消息 API 发送，access_token 仅在进程内缓存，失效时自动刷新一次。
 
 ---
 

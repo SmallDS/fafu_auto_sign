@@ -58,7 +58,17 @@ def build_app_config(session: Session, settings: Settings) -> AppConfig:
         base_url=FIXED_BASE_URL,
         heartbeat_interval=settings.heartbeat_interval,
         log_level=settings.log_level,
-        notification_enabled=settings.notification_enabled,
-        serverchan_key=settings.serverchan_key,
+        wechat_test_enabled=settings.wechat_test_enabled,
+        wechat_test_app_id=settings.wechat_test_app_id,
+        wechat_test_app_secret=settings.wechat_test_app_secret,
+        wechat_test_template_id=settings.wechat_test_template_id,
+        wechat_test_openid=settings.wechat_test_openid,
         task_keywords=json.loads(settings.task_keywords_json),
     )
+
+
+def build_task_query_config(settings: Settings) -> AppConfig:
+    """Build a read-only FAFU configuration that only requires the persisted Token."""
+    if not settings.user_token:
+        raise ConfigurationIncomplete("缺少运行配置: user_token")
+    return AppConfig(user_token=settings.user_token, base_url=FIXED_BASE_URL)

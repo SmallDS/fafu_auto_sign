@@ -5,6 +5,7 @@ import {
   MenuOutlined,
   PictureOutlined,
   SettingOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import { Button, Drawer, Grid, Layout, Menu, Space, Typography } from 'antd';
 import { useState, type ReactNode } from 'react';
@@ -15,6 +16,7 @@ const { Header, Sider, Content } = Layout;
 const menuItems = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '概览' },
   { key: '/settings', icon: <SettingOutlined />, label: '设置' },
+  { key: '/sign-tasks', icon: <UnorderedListOutlined />, label: '签到任务' },
   { key: '/images', icon: <PictureOutlined />, label: '图片' },
   { key: '/history', icon: <HistoryOutlined />, label: '历史' },
   { key: '/logs', icon: <FileSearchOutlined />, label: '日志' },

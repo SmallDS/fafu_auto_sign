@@ -74,10 +74,11 @@ def import_legacy_config(session: Session) -> Path | None:
         isinstance(item, str) and item.strip() for item in keywords
     ):
         settings.task_keywords_json = json.dumps(keywords, ensure_ascii=False)
-    settings.notification_enabled = bool(data.get("notification_enabled", False))
-    key = data.get("serverchan_key")
-    if isinstance(key, str) and key:
-        settings.serverchan_key = key
+    settings.wechat_test_enabled = bool(data.get("wechat_test_enabled", False))
+    for field in ("wechat_test_app_id", "wechat_test_app_secret", "wechat_test_template_id", "wechat_test_openid"):
+        value = data.get(field)
+        if isinstance(value, str) and value:
+            setattr(settings, field, value)
 
     base = source.parent
     imported_single: str | None = None

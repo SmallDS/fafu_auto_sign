@@ -13,7 +13,7 @@
 | `test_*.py` | 标准单元测试 | `test_client.py` |
 | `test_*_characterization.py` | 特性/黄金主文件测试 | `test_crypto_characterization.py` |
 | `conftest.py` | 共享fixtures | `conftest.py` |
-| `test_notification_service.py` | 通知服务测试 | 测试 Server酱推送、去重逻辑 |
+| `test_notification_service.py` | 通知服务测试 | 测试微信测试号推送、去重逻辑 |
 
 ---
 
@@ -46,8 +46,11 @@ def mock_response_success():
 def mock_notification_config():
     # 启用通知的 Mock 配置
     config = MagicMock()
-    config.notification_enabled = True
-    config.serverchan_key = "SCT1234567890"
+    config.wechat_test_enabled = True
+    config.wechat_test_app_id = "appid"
+    config.wechat_test_app_secret = "secret"
+    config.wechat_test_template_id = "template"
+    config.wechat_test_openid = "openid"
     return config
 
 @pytest.fixture
@@ -122,10 +125,10 @@ def test_jitter_out_of_range():
 ```python
 from unittest.mock import patch, MagicMock
 
-@patch('serverchan_sdk.sc_send')
-def test_notify_success(mock_sc_send, notification_service):
-    # Mock sc_send 返回成功
-    mock_sc_send.return_value = {'code': 0}
+@patch('fafu_auto_sign.services.wechat_test_account_service.requests.Session')
+def test_notify_success(mock_session, notification_service):
+    # Mock 微信测试号请求返回成功
+    mock_session.return_value.post.return_value.json.return_value = {'errcode': 0}
     result = notification_service.notify("测试标题", "测试内容")
     assert result is True
 
@@ -143,7 +146,7 @@ def test_deduplication_logic(notification_service):
 ```
 
 **通知测试要点：**
-- 使用 `@patch('serverchan_sdk.sc_send')` Mock 发送函数
+- 使用 `@patch('fafu_auto_sign.services.wechat_test_account_service.requests.Session')` Mock 发送函数
 - 测试去重逻辑时使用固定的 task_id 和 success 组合
 - 验证通知失败时不抛出异常（fire-and-forget）
 - 测试覆盖率目标 > 80%

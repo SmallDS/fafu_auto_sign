@@ -5,12 +5,16 @@ const settings = {
   version: 3,
   has_user_token: true,
   user_token_masked: '2_t********oken',
-  has_serverchan_key: false,
-  serverchan_key_masked: null,
   jitter: 0.00005,
   heartbeat_interval: 900,
   log_level: 'INFO',
-  notification_enabled: false,
+  wechat_test_enabled: false,
+  wechat_test_app_id: null,
+  wechat_test_template_id: null,
+  has_wechat_test_app_secret: false,
+  wechat_test_app_secret_masked: null,
+  has_wechat_test_openid: false,
+  wechat_test_openid_masked: null,
   task_keywords: ['晚归'],
   image_mode: 'library',
   selected_image_id: null,
@@ -33,6 +37,17 @@ async function mockApi(page: Page): Promise<void> {
         recent_run: null,
         stats_7d: { total: 0, success: 0, partial: 0, failed: 0, fatal: 0, no_task: 0 },
       };
+    } else if (path === '/api/sign-tasks') {
+      const now = Date.now();
+      body = {
+        items: [{ id: '123', name: '课堂签到', begin_time: now - 60_000, end_time: now + 60_000 }],
+        total: null,
+        page: 1,
+        page_size: 20,
+        has_more: false,
+      };
+    } else if (path === '/api/sign-tasks/123') {
+      body = { task_id: 123, position_id: 456, base_lng: 118.1, base_lat: 25.1, position_name: '宿舍楼' };
     } else if (path === '/api/images') {
       body = { items: [], total: 0, page: 1, page_size: 24 };
     } else if (path === '/api/runs') {
@@ -67,6 +82,7 @@ for (const viewport of cases) {
     for (const [path, heading] of [
       ['/dashboard', '运行概览'],
       ['/settings', '系统设置'],
+      ['/sign-tasks', '签到任务'],
       ['/images', '图片管理'],
       ['/history', '运行历史'],
       ['/logs', '运行日志'],

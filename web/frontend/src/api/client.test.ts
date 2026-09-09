@@ -10,12 +10,16 @@ describe('api client', () => {
       version: 2,
       has_user_token: true,
       user_token_masked: '2_****',
-      has_serverchan_key: false,
-      serverchan_key_masked: null,
       jitter: 0.00005,
       heartbeat_interval: 900,
       log_level: 'INFO',
-      notification_enabled: false,
+      wechat_test_enabled: false,
+      wechat_test_app_id: null,
+      wechat_test_template_id: null,
+      has_wechat_test_app_secret: false,
+      wechat_test_app_secret_masked: null,
+      has_wechat_test_openid: false,
+      wechat_test_openid_masked: null,
       task_keywords: ['晚归'],
       image_mode: 'library',
       selected_image_id: null,
@@ -27,11 +31,23 @@ describe('api client', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await api.updateSettings({ jitter: 0.00005, task_keywords: ['晚归'] });
+    await api.updateSettings({
+      jitter: 0.00005,
+      task_keywords: ['晚归'],
+      wechat_test_enabled: true,
+      wechat_test_app_secret: 'secret',
+      wechat_test_openid: 'openid',
+    });
 
     expect(fetchMock).toHaveBeenCalledWith('/api/settings', expect.objectContaining({
       method: 'PUT',
-      body: JSON.stringify({ jitter: 0.00005, task_keywords: ['晚归'] }),
+      body: JSON.stringify({
+        jitter: 0.00005,
+        task_keywords: ['晚归'],
+        wechat_test_enabled: true,
+        wechat_test_app_secret: 'secret',
+        wechat_test_openid: 'openid',
+      }),
     }));
   });
 
@@ -63,5 +79,13 @@ describe('api client', () => {
     expect(form.getAll('files')).toHaveLength(2);
     expect(form.get('category')).toBe('latest');
     expect(new Headers(init.headers).get('Content-Type')).toBeNull();
+  });
+  it('提交微信公众号测试号的独立测试请求', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      state: 'idle', message: '测试号通知已提交',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.testWechatNotification();
+    expect(fetchMock).toHaveBeenCalledWith('/api/notifications/wechat-test/test', expect.objectContaining({ method: 'POST' }));
   });
 });

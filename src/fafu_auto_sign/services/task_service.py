@@ -13,6 +13,10 @@ from fafu_auto_sign.client import FAFUClient
 from fafu_auto_sign.config import AppConfig
 
 
+class TaskDetailsFetchError(RuntimeError):
+    """任务详情请求或响应解码失败。"""
+
+
 @dataclass
 class TaskDetails:
     """包含位置信息的任务详情数据类。
@@ -30,6 +34,27 @@ class TaskDetails:
     base_lng: float
     base_lat: float
     position_name: str
+
+
+@dataclass(frozen=True)
+class SignTask:
+    """上游未签到任务列表中的稳定字段。"""
+
+    id: str
+    name: str
+    begin_time: int
+    end_time: int
+
+
+@dataclass(frozen=True)
+class SignTaskPage:
+    """FAFU 未签到任务分页结果。"""
+
+    items: tuple[SignTask, ...]
+    page: int
+    page_size: int
+    total: int | None
+    has_more: bool
 
 
 class TaskService:
@@ -64,6 +89,57 @@ class TaskService:
         self.client = client
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
+
+    def get_pending_task_page(self, page: int, page_size: int) -> SignTaskPage:
+        """直接分页读取上游未签到任务，不做时间或关键词过滤。"""
+        if page < 1 or page_size < 1:
+            raise ValueError("page 和 page_size 必须大于 0")
+
+        url = (
+            f"{self.TASK_LIST_ENDPOINT}"
+            f"?rows={page_size}"
+            f"&pageNum={page}"
+            f"&signState={self.DEFAULT_SIGN_STATE}"
+        )
+        self.logger.info(f"[*] 请求 URL: {url}")
+        response = self.client.post(
+            url, headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
+        data = response.json()
+        raw_records = data.get("records", [])
+        records = raw_records if isinstance(raw_records, list) else []
+        items: list[SignTask] = []
+        for record in records:
+            if not isinstance(record, dict) or record.get("id") is None:
+                continue
+            try:
+                begin_time = int(record.get("beginTime", 0))
+                end_time = int(record.get("endTime", 0))
+            except (TypeError, ValueError):
+                continue
+            items.append(
+                SignTask(
+                    id=str(record["id"]),
+                    name=str(record.get("name", "")),
+                    begin_time=begin_time,
+                    end_time=end_time,
+                )
+            )
+
+        raw_total = data.get("total")
+        total = (
+            raw_total
+            if isinstance(raw_total, int) and not isinstance(raw_total, bool) and raw_total >= 0
+            else None
+        )
+        has_more = page * page_size < total if total is not None else len(records) >= page_size
+        return SignTaskPage(
+            items=tuple(items),
+            page=page,
+            page_size=page_size,
+            total=total,
+            has_more=has_more,
+        )
 
     def get_pending_tasks(self) -> list[str]:
         """获取所有匹配的待办任务 ID。
@@ -162,66 +238,49 @@ class TaskService:
         task_ids = self.get_pending_tasks()
         return task_ids[0] if task_ids else None
 
-    def get_task_details(self, task_id: int) -> Optional[TaskDetails]:
-        """获取包含位置信息的任务详情。
-
-        本方法从 API 获取任务详情，并提取签到位置信息，
-        包括坐标和位置 ID。
-
-        参数:
-            task_id: 要获取详情的任务 ID
-
-        返回:
-            如果成功则返回 TaskDetails 对象，否则返回 None：
-            - 如果 signInPositions 为空或 None 则返回 None
-            - 如果 API 请求失败则返回 None
-            - 如果响应解析失败则返回 None
-        """
+    def _get_task_details(self, task_id: int) -> Optional[TaskDetails]:
+        """Request and parse task details; transport and decoding errors propagate."""
         url = f"/health-api/sign_in/{task_id}?fromPage=0"
-
         self.logger.info(f"[*] 请求任务详情 URL: {url}")
+        response = self.client.get(url)
+        data = response.json()
+        sign_in_positions = data.get("signInPositions", [])
+        if not sign_in_positions:
+            self.logger.warning(f"[!] 任务 {task_id} 没有签到位置信息")
+            return None
 
+        position = sign_in_positions[0]
+        position_id = position.get("id")
+        lng_str = position.get("lng", "0")
+        lat_str = position.get("lat", "0")
+        position_name = position.get("positionName", "")
         try:
-            # 发起 GET 请求获取任务详情
-            response = self.client.get(url)
+            base_lng = float(lng_str)
+            base_lat = float(lat_str)
+        except (ValueError, TypeError) as exc:
+            self.logger.error(f"[!] 无法解析坐标: lng={lng_str}, lat={lat_str}, 错误: {exc}")
+            return None
 
-            # 解析 JSON 响应
-            data = response.json()
-            sign_in_positions = data.get("signInPositions", [])
+        self.logger.info(f"[*] 成功获取任务 {task_id} 的位置信息: {position_name}")
+        return TaskDetails(
+            task_id=task_id,
+            position_id=position_id,
+            base_lng=base_lng,
+            base_lat=base_lat,
+            position_name=position_name,
+        )
 
-            # 边界检查：如果 signInPositions 为空或 None 则返回 None
-            if not sign_in_positions:
-                self.logger.warning(f"[!] 任务 {task_id} 没有签到位置信息")
-                return None
+    def get_task_details_strict(self, task_id: int) -> Optional[TaskDetails]:
+        """Get details while distinguishing upstream failures from missing details."""
+        try:
+            return self._get_task_details(task_id)
+        except Exception as exc:
+            raise TaskDetailsFetchError("任务详情请求失败") from exc
 
-            # 提取第一个位置
-            position = sign_in_positions[0]
-
-            # 解析并转换字段
-            position_id = position.get("id")
-            lng_str = position.get("lng", "0")
-            lat_str = position.get("lat", "0")
-            position_name = position.get("positionName", "")
-
-            # 将经度/纬度转换为浮点数，使用防御式编程
-            try:
-                base_lng = float(lng_str)
-                base_lat = float(lat_str)
-            except (ValueError, TypeError) as e:
-                self.logger.error(f"[!] 无法解析坐标: lng={lng_str}, lat={lat_str}, 错误: {e}")
-                return None
-
-            self.logger.info(f"[*] 成功获取任务 {task_id} 的位置信息: {position_name}")
-
-            return TaskDetails(
-                task_id=task_id,
-                position_id=position_id,
-                base_lng=base_lng,
-                base_lat=base_lat,
-                position_name=position_name,
-            )
-
-        except Exception as e:
-            # 记录错误并返回 None
-            self.logger.error(f"[!] 获取任务详情时发生异常: {e}")
+    def get_task_details(self, task_id: int) -> Optional[TaskDetails]:
+        """Get details with the legacy CLI-compatible error-to-None behavior."""
+        try:
+            return self._get_task_details(task_id)
+        except Exception as exc:
+            self.logger.error(f"[!] 获取任务详情时发生异常: {exc}")
             return None

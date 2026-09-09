@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from pydantic import BeforeValidator, Field, field_validator
+from pydantic import BeforeValidator, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,14 +41,32 @@ class AppConfig(BaseSettings):
     heartbeat_interval: int = Field(default=900, description="心跳间隔（秒）")
     log_level: str = Field(default="INFO", description="日志级别")
     # 通知配置
-    notification_enabled: bool = Field(default=False, description="启用通知")
-    serverchan_key: Optional[str] = Field(default=None, description="Server酱 SendKey")
+    wechat_test_enabled: bool = Field(default=False, description="启用微信公众号接口测试号通知")
+    wechat_test_app_id: Optional[str] = Field(default=None, description="微信测试号 AppID")
+    wechat_test_app_secret: Optional[str] = Field(default=None, description="微信测试号 AppSecret")
+    wechat_test_template_id: Optional[str] = Field(default=None, description="微信测试号模板 ID")
+    wechat_test_openid: Optional[str] = Field(default=None, description="微信测试号 OpenID")
     # 任务识别配置
     task_keywords: list[str] = Field(default=["晚归"], description="任务关键词列表")
     latest_image_dir: Optional[str] = Field(
         default=None, description="最新图片目录路径（选择最新修改的图片）"
     )
 
+    @property
+    def notification_enabled(self) -> bool:
+        """兼容原客户端的通知开关；不会进入配置序列化结果。"""
+        return self.wechat_test_enabled
+
+    @model_validator(mode="after")
+    def validate_wechat_test_config(self) -> "AppConfig":
+        if self.wechat_test_enabled and not all((
+            self.wechat_test_app_id,
+            self.wechat_test_app_secret,
+            self.wechat_test_template_id,
+            self.wechat_test_openid,
+        )):
+            raise ValueError("启用微信测试号前必须完整配置 AppID、AppSecret、模板 ID 和 OpenID")
+        return self
     @staticmethod
     def _parse_task_keywords(v: Any) -> Any:
         """解析任务关键词，支持字符串（逗号分隔）和列表。"""
@@ -135,16 +153,6 @@ class AppConfig(BaseSettings):
             raise ValueError(f"日志级别必须是 {valid_levels} 之一，当前值: {v}")
         return v.upper()
 
-    @field_validator("serverchan_key")
-    @classmethod
-    def validate_serverchan_key(cls, v: Optional[str]) -> Optional[str]:
-        """验证 Server酱 SendKey 格式（以 SCT、SC3 或 sctp 开头）。"""
-        if v is not None:
-            if not v.startswith(("SCT", "SC3", "sctp")):
-                raise ValueError(
-                    f"Server酱 SendKey 必须以 'SCT'、'SC3' 或 'sctp' 开头，当前值: {v[:20]}..."
-                )
-        return v
 
 
 def load_config(config_path: str | Path | None = None) -> AppConfig:
@@ -196,16 +204,13 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         config_dict["heartbeat_interval"] = int(interval_env)
     if os.environ.get("FAFU_LOG_LEVEL"):
         config_dict["log_level"] = os.environ.get("FAFU_LOG_LEVEL")
-    notification_enabled_env = os.environ.get("FAFU_NOTIFICATION_ENABLED")
-    if notification_enabled_env:
-        config_dict["notification_enabled"] = notification_enabled_env.lower() in (
-            "true",
-            "1",
-            "yes",
-            "on",
-        )
-    if os.environ.get("FAFU_SERVERCHAN_KEY"):
-        config_dict["serverchan_key"] = os.environ.get("FAFU_SERVERCHAN_KEY")
+    wechat_enabled = os.environ.get("FAFU_WECHAT_TEST_ENABLED")
+    if wechat_enabled:
+        config_dict["wechat_test_enabled"] = wechat_enabled.lower() in ("true", "1", "yes", "on")
+    for field in ("APP_ID", "APP_SECRET", "TEMPLATE_ID", "OPENID"):
+        value = os.environ.get(f"FAFU_WECHAT_TEST_{field}")
+        if value:
+            config_dict[f"wechat_test_{field.lower()}"] = value
     # 处理新配置项
     task_keywords_env = os.environ.get("FAFU_TASK_KEYWORDS")
     if task_keywords_env:
@@ -243,8 +248,11 @@ def create_example_config(path: str | Path = "config.json.example") -> None:
         "base_url": "http://stuhtapi.fafu.edu.cn",
         "heartbeat_interval": 900,
         "log_level": "INFO",
-        "notification_enabled": False,
-        "serverchan_key": None,  # Server酱 SendKey（以 SCT 开头）
+        "wechat_test_enabled": False,
+        "wechat_test_app_id": None,
+        "wechat_test_app_secret": None,
+        "wechat_test_template_id": None,
+        "wechat_test_openid": None,
         "task_keywords": ["晚归"],  # 任务关键词列表，匹配任一关键词即可
         "latest_image_dir": None,  # 最新图片目录路径（选择最新修改的图片）
     }

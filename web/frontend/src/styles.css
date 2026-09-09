@@ -554,3 +554,45 @@ select {
     display: none;
   }
 }
+.unknown-total-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+.sign-task-mobile-item {
+  min-width: 0;
+  padding-block: 16px !important;
+}
+
+.sign-task-mobile-item .ant-typography {
+  overflow-wrap: anywhere;
+}
+
+.sign-task-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 767px) {
+  .sign-task-card > .ant-card-body {
+    min-width: 0;
+  }
+
+  .sign-task-actions,
+  .sign-task-actions > .ant-space,
+  .sign-task-actions .ant-btn {
+    width: 100%;
+  }
+
+  .sign-task-actions > .ant-space {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.wechat-template-preview {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

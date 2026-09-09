@@ -5,14 +5,18 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.errors import redact_sensitive_payload, redact_sensitive_text
 from app.models import AppMeta, Image, RunHistory, Settings, utcnow
 from app.paths import LATEST_DIR, LIBRARY_DIR
 from app.schemas import ImageRead, RunRead, SettingsRead, SettingsUpdate
+
+if TYPE_CHECKING:
+    from fafu_auto_sign.executor import RunSummary
 
 
 def mask_secret(value: str | None) -> str | None:
@@ -44,9 +48,13 @@ def settings_to_read(session: Session, settings: Settings) -> SettingsRead:
         jitter=settings.jitter,
         heartbeat_interval=settings.heartbeat_interval,
         log_level=settings.log_level,
-        notification_enabled=settings.notification_enabled,
-        has_serverchan_key=bool(settings.serverchan_key),
-        serverchan_key_masked=mask_secret(settings.serverchan_key),
+        wechat_test_enabled=settings.wechat_test_enabled,
+        wechat_test_app_id=settings.wechat_test_app_id,
+        wechat_test_template_id=settings.wechat_test_template_id,
+        has_wechat_test_app_secret=bool(settings.wechat_test_app_secret),
+        wechat_test_app_secret_masked=mask_secret(settings.wechat_test_app_secret),
+        has_wechat_test_openid=bool(settings.wechat_test_openid),
+        wechat_test_openid_masked=mask_secret(settings.wechat_test_openid),
         task_keywords=json.loads(settings.task_keywords_json),
         image_mode=settings.image_mode,  # type: ignore[arg-type]
         selected_image_id=settings.current_image_id,
@@ -64,16 +72,24 @@ def update_settings(session: Session, payload: SettingsUpdate) -> Settings:
     elif "user_token" in fields_set and payload.user_token:
         settings.user_token = payload.user_token
 
-    if payload.clear_serverchan_key:
-        settings.serverchan_key = None
-    elif "serverchan_key" in fields_set and payload.serverchan_key:
-        settings.serverchan_key = payload.serverchan_key
+    if payload.clear_wechat_test_app_secret:
+        settings.wechat_test_app_secret = None
+        settings.wechat_test_enabled = False
+    elif "wechat_test_app_secret" in fields_set and payload.wechat_test_app_secret:
+        settings.wechat_test_app_secret = payload.wechat_test_app_secret
+    if payload.clear_wechat_test_openid:
+        settings.wechat_test_openid = None
+        settings.wechat_test_enabled = False
+    elif "wechat_test_openid" in fields_set and payload.wechat_test_openid:
+        settings.wechat_test_openid = payload.wechat_test_openid
 
     for name in (
         "jitter",
         "heartbeat_interval",
         "log_level",
-        "notification_enabled",
+        "wechat_test_enabled",
+        "wechat_test_app_id",
+        "wechat_test_template_id",
         "image_mode",
         "worker_enabled",
     ):
@@ -89,8 +105,13 @@ def update_settings(session: Session, payload: SettingsUpdate) -> Settings:
             raise ValueError("选择的图片不存在")
         settings.current_image_id = payload.selected_image_id
 
-    if settings.notification_enabled and not settings.serverchan_key:
-        raise ValueError("启用通知前必须配置 SendKey")
+    if settings.wechat_test_enabled and not all((
+        settings.wechat_test_app_id,
+        settings.wechat_test_app_secret,
+        settings.wechat_test_template_id,
+        settings.wechat_test_openid,
+    )):
+        raise ValueError("启用微信测试号前必须完整配置 AppID、AppSecret、模板 ID 和 OpenID")
     if settings.image_mode == "single" and settings.current_image_id:
         image = session.get(Image, settings.current_image_id)
         if image is None or image.purpose != "library":
@@ -193,3 +214,32 @@ def set_meta(session: Session, key: str, value: str) -> None:
 def get_meta(session: Session, key: str) -> str | None:
     row = session.get(AppMeta, key)
     return row.value if row else None
+
+
+def save_run_summary(session: Session, summary: "RunSummary") -> RunHistory:
+    """Persist one executor summary for worker and direct manual submissions."""
+    task_results = redact_sensitive_payload(summary.to_dict().get("task_results", []))
+    text = summary.error or {
+        "no_task": "未发现待签到任务",
+        "success": "签到成功",
+        "partial": "部分任务处理失败",
+        "failed": "签到失败",
+        "fatal": "发生致命错误，调度已暂停",
+    }.get(summary.status, summary.status)
+    row = RunHistory(
+        trigger=summary.trigger,
+        config_version=summary.config_version,
+        started_at=summary.started_at,
+        finished_at=summary.finished_at,
+        status=summary.status,
+        discovered_count=summary.discovered_count,
+        success_count=summary.success_count,
+        failure_count=summary.failure_count,
+        summary=redact_sensitive_text(text, "执行结果不可用") or "执行结果不可用",
+        task_details_json=json.dumps(task_results, ensure_ascii=False),
+        error=redact_sensitive_text(summary.error),
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row

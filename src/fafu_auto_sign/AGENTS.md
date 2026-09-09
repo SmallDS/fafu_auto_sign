@@ -80,13 +80,12 @@ UploadService.upload_image(image_path: str) -> Optional[str]  # 上传图片
 ### notification_service.py
 
 ```python
-NotificationService(config: AppConfig)  # 初始化，验证 SendKey
+NotificationService(config: AppConfig)  # 初始化微信测试号通知
 # notify(title, content, task_id, success) -> bool  # 发送通知（非阻塞）
 # _should_notify(task_id, success) -> bool  # 5分钟去重检查
 # _cleanup_expired()  # 清理过期去重记录
 
-# 使用 serverchan_sdk.sc_send() 发送消息
-# 自动检测 SendKey 格式（SC3 vs SCT）
+# 使用微信公众号接口测试号模板消息 API 发送
 # 失败只记录日志，不抛出异常
 ```
 ---

@@ -6,7 +6,7 @@ import pytest
 
 from fafu_auto_sign.config import AppConfig
 from fafu_auto_sign.executor import SignExecutor
-from fafu_auto_sign.services.task_service import TaskDetails
+from fafu_auto_sign.services.task_service import TaskDetails, TaskDetailsFetchError
 
 
 def create_config(**overrides: object) -> AppConfig:
@@ -33,6 +33,7 @@ def create_executor(
     sign_service = MagicMock()
     task_service.get_pending_tasks.return_value = task_ids
     task_service.get_task_details.return_value = details
+    task_service.get_task_details_strict.return_value = details
     upload_service.upload_image.return_value = image_url
     sign_service.submit_sign.return_value = sign_success
     executor = SignExecutor(
@@ -196,3 +197,37 @@ class TestCliLoop:
             run("config.json")
 
         shutdown.wait.assert_called_once_with(37)
+
+
+def test_execute_task_once_preserves_detail_upload_sign_order() -> None:
+    details = TaskDetails(123, 456, 118.0, 25.0, "测试位置")
+    executor, _, task_service, upload_service, sign_service = create_executor(
+        task_ids=[], details=details
+    )
+    calls: list[str] = []
+    task_service.get_task_details_strict.side_effect = (
+        lambda _task_id: calls.append("details") or details
+    )
+    upload_service.upload_image.side_effect = lambda _path: calls.append("upload") or "image-url"
+    sign_service.submit_sign.side_effect = lambda **_kwargs: calls.append("sign") or True
+
+    summary = executor.execute_task_once("123", config_version=7, capture_fatal=True)
+
+    assert summary.status == "success"
+    assert summary.trigger == "manual"
+    assert summary.config_version == 7
+    assert calls == ["details", "upload", "sign"]
+    task_service.get_pending_tasks.assert_not_called()
+    task_service.get_task_details_strict.assert_called_once_with(123)
+
+
+def test_execute_task_once_propagates_strict_details_fetch_error() -> None:
+    executor, _, task_service, upload_service, sign_service = create_executor(task_ids=[])
+    task_service.get_task_details_strict.side_effect = TaskDetailsFetchError("任务详情请求失败")
+
+    with pytest.raises(TaskDetailsFetchError):
+        executor.execute_task_once("123", capture_fatal=True)
+
+    task_service.get_task_details_strict.assert_called_once_with(123)
+    upload_service.upload_image.assert_not_called()
+    sign_service.submit_sign.assert_not_called()

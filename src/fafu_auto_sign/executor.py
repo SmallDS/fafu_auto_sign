@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from collections.abc import Callable
 from typing import Any, Literal
 
 from requests.exceptions import ConnectionError, RequestException
@@ -13,6 +13,7 @@ from requests.exceptions import ConnectionError, RequestException
 from fafu_auto_sign.client import FAFUClient
 from fafu_auto_sign.config import AppConfig
 from fafu_auto_sign.services import SignService, TaskService
+from fafu_auto_sign.services.task_service import TaskDetailsFetchError
 from fafu_auto_sign.services.upload_service import UploadService
 
 TaskRunStatus = Literal["success", "failed", "skipped"]
@@ -95,11 +96,7 @@ class RunSummary:
 
 
 class SignExecutor:
-    """执行单轮签到，并将业务结果聚合为稳定的数据结构。
-
-    ``config`` 在构造时即被视为本轮配置快照。默认情况下执行器拥有
-    自己的客户端；测试或 CLI 兼容层也可以注入已创建的服务实例。
-    """
+    """执行单轮签到，并将业务结果聚合为稳定的数据结构。"""
 
     def __init__(
         self,
@@ -124,6 +121,156 @@ class SignExecutor:
         self.logger = logging.getLogger(self.__class__.__name__)
         self._closed = False
 
+    def _process_task(
+        self,
+        task_id: str,
+        should_stop: Callable[[], bool] | None = None,
+        strict_details: bool = False,
+    ) -> tuple[TaskRunResult | None, bool]:
+        """执行共享的“详情→上传→签到”单任务调用链。"""
+        task_started_at = _utc_now()
+        position_name: str | None = None
+        image_url: str | None = None
+        try:
+            self.logger.info(f"开始处理任务 {task_id}")
+            task_details = (
+                self.task_service.get_task_details_strict(int(task_id))
+                if strict_details
+                else self.task_service.get_task_details(int(task_id))
+            )
+            if task_details is None:
+                error = "任务无地理位置限制或任务详情不可用"
+                self.logger.warning(f"任务 {task_id} 无地理位置限制，跳过签到")
+                return (
+                    TaskRunResult(
+                        task_id=task_id,
+                        status="skipped",
+                        started_at=task_started_at,
+                        finished_at=_utc_now(),
+                        error=error,
+                    ),
+                    False,
+                )
+
+            position_name = task_details.position_name
+            self.logger.info(f"获取到签到位置：{position_name}")
+            if should_stop is not None and should_stop():
+                return None, True
+
+            image_url = self.upload_service.upload_image(self.config.image_path)
+            if not image_url:
+                return (
+                    TaskRunResult(
+                        task_id=task_id,
+                        status="failed",
+                        started_at=task_started_at,
+                        finished_at=_utc_now(),
+                        position_name=position_name,
+                        error="图片上传失败",
+                    ),
+                    False,
+                )
+
+            success = self.sign_service.submit_sign(
+                task_id=int(task_id),
+                position_id=task_details.position_id,
+                base_lng=task_details.base_lng,
+                base_lat=task_details.base_lat,
+                image_url=image_url,
+            )
+            result_error: str | None
+            if success:
+                self.logger.info(f"✅ 签到成功！位置：{position_name}")
+                status: TaskRunStatus = "success"
+                result_error = None
+            else:
+                self.logger.error(f"❌ 签到失败！位置：{position_name}")
+                status = "failed"
+                result_error = "签到提交失败"
+            return (
+                TaskRunResult(
+                    task_id=task_id,
+                    status=status,
+                    started_at=task_started_at,
+                    finished_at=_utc_now(),
+                    position_name=position_name,
+                    image_url=image_url,
+                    error=result_error,
+                ),
+                False,
+            )
+        except SystemExit:
+            raise
+        except TaskDetailsFetchError:
+            raise
+        except Exception as exc:
+            self.logger.error(f"处理任务 {task_id} 时发生异常: {exc}")
+            return (
+                TaskRunResult(
+                    task_id=task_id,
+                    status="failed",
+                    started_at=task_started_at,
+                    finished_at=_utc_now(),
+                    position_name=position_name,
+                    image_url=image_url,
+                    error=str(exc),
+                ),
+                False,
+            )
+
+    def execute_task_once(
+        self,
+        task_id: str,
+        trigger: str = "manual",
+        config_version: int = 0,
+        capture_fatal: bool = False,
+    ) -> RunSummary:
+        """处理指定任务一次，不重新扫描任务列表。"""
+        if self._closed:
+            raise RuntimeError("SignExecutor 已关闭，不能继续执行")
+        started_at = _utc_now()
+        try:
+            result, _ = self._process_task(str(task_id), strict_details=True)
+            task_results = (result,) if result is not None else ()
+            result_list = list(task_results)
+            return RunSummary(
+                trigger=trigger,
+                config_version=config_version,
+                status=self._status_from_results(result_list),
+                started_at=started_at,
+                finished_at=_utc_now(),
+                task_results=task_results,
+                discovered_task_count=1,
+                error=self._error_summary(result_list),
+            )
+        except TaskDetailsFetchError:
+            raise
+        except SystemExit as exc:
+            if not capture_fatal:
+                raise
+            return self._fatal_summary(
+                task_id=str(task_id),
+                trigger=trigger,
+                config_version=config_version,
+                started_at=started_at,
+                exit_code=exc.code,
+                discovered_count=1,
+            )
+        except (ConnectionError, RequestException) as exc:
+            error = f"请求错误: {exc}"
+        except Exception as exc:
+            error = f"发生异常: {exc}"
+        self.logger.error(error)
+        return RunSummary(
+            trigger=trigger,
+            config_version=config_version,
+            status="failed",
+            started_at=started_at,
+            finished_at=_utc_now(),
+            discovered_task_count=1,
+            error=error,
+        )
+
     def execute_once(
         self,
         trigger: str = "scheduled",
@@ -131,12 +278,7 @@ class SignExecutor:
         capture_fatal: bool = False,
         should_stop: Callable[[], bool] | None = None,
     ) -> RunSummary:
-        """扫描并处理一次待签到任务。
-
-        ``capture_fatal`` 为 ``True`` 时，将底层客户端针对 401/408 抛出的
-        ``SystemExit`` 转换为 ``fatal`` 结果，供 Web Worker 自动暂停。
-        CLI 使用默认值 ``False``，保持原有致命退出行为。
-        """
+        """扫描并处理一次待签到任务。"""
         if self._closed:
             raise RuntimeError("SignExecutor 已关闭，不能继续执行")
 
@@ -144,14 +286,10 @@ class SignExecutor:
         task_results: list[TaskRunResult] = []
         discovered_task_count = 0
         active_task_id: str | None = None
-        active_task_started_at: datetime | None = None
-        active_position_name: str | None = None
         stopped = False
-
         try:
             task_ids = self.task_service.get_pending_tasks()
             discovered_task_count = len(task_ids)
-
             if not task_ids:
                 return RunSummary(
                     trigger=trigger,
@@ -159,164 +297,64 @@ class SignExecutor:
                     status="no_task",
                     started_at=started_at,
                     finished_at=_utc_now(),
-                    discovered_task_count=0,
                 )
 
             self.logger.info(f"发现 {len(task_ids)} 个待签到任务")
-
             for raw_task_id in task_ids:
                 if should_stop is not None and should_stop():
                     stopped = True
                     break
                 active_task_id = str(raw_task_id)
-                active_task_started_at = _utc_now()
-                active_position_name = None
-                image_url: str | None = None
+                result, stopped = self._process_task(active_task_id, should_stop)
+                if result is not None:
+                    task_results.append(result)
+                active_task_id = None
+                if stopped:
+                    break
 
-                try:
-                    self.logger.info(f"开始处理任务 {active_task_id}")
-                    task_details = self.task_service.get_task_details(int(active_task_id))
-                    if task_details is None:
-                        skip_error = "任务无地理位置限制或任务详情不可用"
-                        self.logger.warning(f"任务 {active_task_id} 无地理位置限制，跳过签到")
-                        task_results.append(
-                            TaskRunResult(
-                                task_id=active_task_id,
-                                status="skipped",
-                                started_at=active_task_started_at,
-                                finished_at=_utc_now(),
-                                error=skip_error,
-                            )
-                        )
-                        active_task_id = None
-                        continue
-
-                    active_position_name = task_details.position_name
-                    self.logger.info(f"获取到签到位置：{active_position_name}")
-
-                    if should_stop is not None and should_stop():
-                        stopped = True
-                        break
-                    image_url = self.upload_service.upload_image(self.config.image_path)
-                    if not image_url:
-                        task_results.append(
-                            TaskRunResult(
-                                task_id=active_task_id,
-                                status="failed",
-                                started_at=active_task_started_at,
-                                finished_at=_utc_now(),
-                                position_name=active_position_name,
-                                error="图片上传失败",
-                            )
-                        )
-                        active_task_id = None
-                        continue
-
-                    success = self.sign_service.submit_sign(
-                        task_id=int(active_task_id),
-                        position_id=task_details.position_id,
-                        base_lng=task_details.base_lng,
-                        base_lat=task_details.base_lat,
-                        image_url=image_url,
-                    )
-                    if success:
-                        self.logger.info(f"✅ 签到成功！位置：{active_position_name}")
-                        task_status: TaskRunStatus = "success"
-                        task_error: str | None = None
-                    else:
-                        self.logger.error(f"❌ 签到失败！位置：{active_position_name}")
-                        task_status = "failed"
-                        task_error = "签到提交失败"
-
-                    task_results.append(
-                        TaskRunResult(
-                            task_id=active_task_id,
-                            status=task_status,
-                            started_at=active_task_started_at,
-                            finished_at=_utc_now(),
-                            position_name=active_position_name,
-                            image_url=image_url,
-                            error=task_error,
-                        )
-                    )
-                    active_task_id = None
-                except SystemExit:
-                    raise
-                except Exception as exc:
-                    error = f"处理任务 {active_task_id} 时发生异常: {exc}"
-                    self.logger.error(error)
-                    task_results.append(
-                        TaskRunResult(
-                            task_id=active_task_id or str(raw_task_id),
-                            status="failed",
-                            started_at=active_task_started_at,
-                            finished_at=_utc_now(),
-                            position_name=active_position_name,
-                            image_url=image_url,
-                            error=str(exc),
-                        )
-                    )
-                    active_task_id = None
-
-            run_status: RunStatus
+            status: RunStatus
             if stopped:
-                run_status = (
+                status = (
                     "partial"
-                    if any(result.status == "success" for result in task_results)
+                    if any(item.status == "success" for item in task_results)
                     else "failed"
                 )
             else:
-                run_status = self._status_from_results(task_results)
-            run_error = self._error_summary(task_results)
+                status = self._status_from_results(task_results)
+            error = self._error_summary(task_results)
             if stopped:
-                run_error = "; ".join(part for part in (run_error, "执行已停止") if part)
+                error = "; ".join(part for part in (error, "执行已停止") if part)
             return RunSummary(
                 trigger=trigger,
                 config_version=config_version,
-                status=run_status,
+                status=status,
                 started_at=started_at,
                 finished_at=_utc_now(),
                 task_results=tuple(task_results),
                 discovered_task_count=discovered_task_count,
-                error=run_error,
+                error=error,
             )
+        except TaskDetailsFetchError:
+            raise
         except SystemExit as exc:
             if not capture_fatal:
                 raise
-
-            fatal_error = f"致命请求错误（退出码: {exc.code}）"
-            if active_task_id is not None and active_task_started_at is not None:
-                task_results.append(
-                    TaskRunResult(
-                        task_id=active_task_id,
-                        status="failed",
-                        started_at=active_task_started_at,
-                        finished_at=_utc_now(),
-                        position_name=active_position_name,
-                        error=fatal_error,
-                    )
-                )
-            self.logger.error(fatal_error)
-            return RunSummary(
+            return self._fatal_summary(
+                task_id=active_task_id,
                 trigger=trigger,
                 config_version=config_version,
-                status="fatal",
                 started_at=started_at,
-                finished_at=_utc_now(),
-                task_results=tuple(task_results),
-                discovered_task_count=discovered_task_count,
-                error=fatal_error,
+                exit_code=exc.code,
+                discovered_count=discovered_task_count,
+                previous_results=task_results,
             )
         except ConnectionError as exc:
             error = f"网络连接错误: {exc}"
-            self.logger.error(error)
         except RequestException as exc:
             error = f"请求错误: {exc}"
-            self.logger.error(error)
         except Exception as exc:
             error = f"发生异常: {exc}"
-            self.logger.error(error)
-
+        self.logger.error(error)
         return RunSummary(
             trigger=trigger,
             config_version=config_version,
@@ -325,6 +363,41 @@ class SignExecutor:
             finished_at=_utc_now(),
             task_results=tuple(task_results),
             discovered_task_count=discovered_task_count,
+            error=error,
+        )
+
+    def _fatal_summary(
+        self,
+        *,
+        task_id: str | None,
+        trigger: str,
+        config_version: int,
+        started_at: datetime,
+        exit_code: object,
+        discovered_count: int,
+        previous_results: list[TaskRunResult] | None = None,
+    ) -> RunSummary:
+        error = f"致命请求错误（退出码: {exit_code}）"
+        results = list(previous_results or [])
+        if task_id is not None:
+            results.append(
+                TaskRunResult(
+                    task_id=task_id,
+                    status="failed",
+                    started_at=started_at,
+                    finished_at=_utc_now(),
+                    error=error,
+                )
+            )
+        self.logger.error(error)
+        return RunSummary(
+            trigger=trigger,
+            config_version=config_version,
+            status="fatal",
+            started_at=started_at,
+            finished_at=_utc_now(),
+            task_results=tuple(results),
+            discovered_task_count=discovered_count,
             error=error,
         )
 
