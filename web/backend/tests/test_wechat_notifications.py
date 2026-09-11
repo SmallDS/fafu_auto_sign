@@ -135,8 +135,39 @@ def test_migration_removes_legacy_notification_columns_and_preserves_data(
         row = connection.exec_driver_sql(
             """
             SELECT user_token, config_version, wechat_test_app_id,
-                   wechat_test_template_id, wechat_test_openid
+                   wechat_test_template_id, wechat_test_openid, task_keywords_json
             FROM settings WHERE id = 1
             """
         ).one()
-    assert tuple(row) == ("2_preserved", 7, "wx-app-id", "template-id", "openid")
+    assert tuple(row) == (
+        "2_preserved",
+        7,
+        "wx-app-id",
+        "template-id",
+        "openid",
+        '["晚归"]',
+    )
+
+    required_values_sql = """
+        INSERT INTO settings (
+            id, jitter, heartbeat_interval, log_level, image_mode,
+            worker_enabled, config_version, created_at, updated_at
+        ) VALUES (
+            :id, 0.00005, 900, 'INFO', 'single',
+            1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+    """
+    with engine.begin() as connection:
+        connection.exec_driver_sql(required_values_sql, {"id": 2})
+        new_default = connection.exec_driver_sql(
+            "SELECT task_keywords_json FROM settings WHERE id = 2"
+        ).scalar_one()
+    assert new_default == "[]"
+
+    command.downgrade(config, "0003_remove_serverchan_notifications")
+    with engine.begin() as connection:
+        connection.exec_driver_sql(required_values_sql, {"id": 3})
+        restored_default = connection.exec_driver_sql(
+            "SELECT task_keywords_json FROM settings WHERE id = 3"
+        ).scalar_one()
+    assert restored_default == '["晚归"]'

@@ -95,6 +95,8 @@ cp config.json.example config.json
 
 然后在 `config.json` 的 `"user_token"` 配置项填入你的 USER_TOKEN。
 
+Web 管理台还支持直接粘贴抓包获得的完整 Base64 Authorization；后端校验其 timestamp:nonce:32位十六进制签名:USER_TOKEN 结构后，只保存末段 2_ Token。
+
 ##### 方式二：环境变量
 
 设置以下环境变量（适用于 Docker、CI/CD 等场景）：

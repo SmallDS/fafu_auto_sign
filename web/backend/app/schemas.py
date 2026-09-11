@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -51,22 +54,45 @@ class SettingsUpdate(BaseModel):
     selected_image_id: str | None = None
     worker_enabled: bool | None = None
 
-    @field_validator("user_token")
+    @field_validator("user_token", mode="before")
     @classmethod
-    def validate_user_token(cls, value: str | None) -> str | None:
-        if value and not value.startswith("2_"):
-            raise ValueError("必须以 2_ 开头")
-        return value
+    def normalize_user_token(cls, value: object) -> object:
+        """Accept a raw USER_TOKEN or extract it from a full Authorization value."""
+        if value is None or not isinstance(value, str):
+            return value
+        candidate = value.strip()
+        if not candidate:
+            return candidate
+        if candidate.startswith("2_"):
+            return candidate
+
+        message = "请输入以 2_ 开头的用户 Token，或有效的完整 Base64 Authorization"
+        try:
+            decoded_bytes = base64.b64decode(candidate, validate=True)
+            if base64.b64encode(decoded_bytes).decode("ascii") != candidate:
+                raise ValueError(message)
+            decoded = decoded_bytes.decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
+            raise ValueError(message) from exc
+
+        parts = decoded.split(":")
+        if (
+            len(parts) != 4
+            or not parts[0].isdigit()
+            or re.fullmatch(r"[A-Za-z0-9]{16}", parts[1]) is None
+            or re.fullmatch(r"[0-9a-fA-F]{32}", parts[2]) is None
+            or not parts[3].startswith("2_")
+            or len(parts[3]) <= 2
+        ):
+            raise ValueError(message)
+        return parts[3]
 
     @field_validator("task_keywords")
     @classmethod
     def validate_keywords(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return value
-        cleaned = [item.strip() for item in value if item.strip()]
-        if not cleaned:
-            raise ValueError("至少需要一个非空关键词")
-        return cleaned
+        return [item.strip() for item in value if item.strip()]
 
     @model_validator(mode="after")
     def validate_secret_actions(self) -> "SettingsUpdate":

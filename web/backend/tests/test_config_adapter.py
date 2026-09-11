@@ -45,6 +45,7 @@ def test_web_snapshot_keeps_fixed_plain_http_base_url(
     config = build_app_config(db_session, settings)
 
     assert config.base_url == FIXED_BASE_URL == "http://stuhtapi.fafu.edu.cn"
+    assert config.task_keywords == []
 
 
 def test_task_query_snapshot_only_requires_token(db_session: Session) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,34 @@ from app.repository import (
     update_settings,
 )
 from app.schemas import SettingsUpdate
+
+
+def test_new_settings_default_to_empty_keywords_and_accept_empty_update(
+    db_session: Session,
+) -> None:
+    settings = get_or_create_settings(db_session)
+    assert settings.task_keywords_json == "[]"
+    assert settings_to_read(db_session, settings).task_keywords == []
+
+    payload = SettingsUpdate(task_keywords=["  ", "\t"])
+    assert payload.task_keywords == []
+
+    updated = update_settings(db_session, payload)
+    assert updated.task_keywords_json == "[]"
+    assert settings_to_read(db_session, updated).task_keywords == []
+
+
+def test_authorization_value_is_normalized_before_persistence(db_session: Session) -> None:
+    user_token = "2_from_authorization"
+    authorization = base64.b64encode(
+        f"1773238142:lnccKsR2ovQ4rbQk:{'a' * 32}:{user_token}".encode()
+    ).decode()
+
+    payload = SettingsUpdate(user_token=authorization)
+    assert payload.user_token == user_token
+
+    settings = update_settings(db_session, payload)
+    assert settings.user_token == user_token
 
 
 def test_secrets_are_masked_preserved_and_explicitly_cleared(db_session: Session) -> None:

@@ -21,6 +21,28 @@ import { AsyncState } from '../components/AsyncState';
 import { PageHeading } from '../components/PageHeading';
 import type { ImageMode, LogLevel, Settings, SettingsUpdate } from '../types/api';
 
+const USER_TOKEN_INPUT_ERROR = '请输入 2_ 开头的 Token 或完整 Base64 Authorization';
+
+export function isSupportedUserTokenInput(value?: string): boolean {
+  const candidate = value?.trim() ?? '';
+  if (!candidate || candidate.startsWith('2_')) return true;
+  try {
+    const decoded = window.atob(candidate);
+    const parts = decoded.split(':');
+    return (
+      window.btoa(decoded) === candidate
+      && parts.length === 4
+      && /^\d+$/.test(parts[0])
+      && /^[A-Za-z0-9]{16}$/.test(parts[1])
+      && /^[0-9a-f]{32}$/i.test(parts[2])
+      && parts[3].startsWith('2_')
+      && parts[3].length > 2
+    );
+  } catch {
+    return false;
+  }
+}
+
 interface SettingsForm {
   user_token?: string;
   wechat_test_enabled: boolean;
@@ -31,7 +53,7 @@ interface SettingsForm {
   jitter: number;
   heartbeat_interval: number;
   log_level: LogLevel;
-  task_keywords: string[];
+  task_keywords?: string[];
   image_mode: ImageMode;
 }
 
@@ -82,7 +104,7 @@ export function SettingsPage(): ReactNode {
       wechat_test_enabled: values.wechat_test_enabled,
       wechat_test_app_id: values.wechat_test_app_id?.trim(),
       wechat_test_template_id: values.wechat_test_template_id?.trim(),
-      task_keywords: values.task_keywords.map((item) => item.trim()).filter(Boolean),
+      task_keywords: (values.task_keywords ?? []).map((item) => item.trim()).filter(Boolean),
       image_mode: values.image_mode,
     };
     if (values.user_token?.trim()) payload.user_token = values.user_token.trim();
@@ -162,11 +184,11 @@ export function SettingsPage(): ReactNode {
               <Alert type="warning" showIcon message="敏感信息以明文保存在 SQLite 中，请只在可信局域网使用管理台。" className="section-alert" />
               <Form.Item
                 name="user_token"
-                label="用户 Token"
-                extra={settings?.has_user_token ? `已保存：${settings.user_token_masked ?? '******'}；留空不修改` : '从数字 FAFU App 请求中获取，必须以 2_ 开头'}
-                rules={[{ validator: async (_, value?: string) => { if (value?.trim() && !value.trim().startsWith('2_')) throw new Error('Token 必须以 2_ 开头'); } }]}
+                label="用户 Token / Authorization"
+                extra={settings?.has_user_token ? '已保存：' + (settings.user_token_masked ?? '******') + '；留空不修改' : '可填写 2_ 开头的 Token，或直接粘贴完整 Base64 Authorization'}
+                rules={[{ validator: async (_, value?: string) => { if (!isSupportedUserTokenInput(value)) throw new Error(USER_TOKEN_INPUT_ERROR); } }]}
               >
-                <Input.Password autoComplete="new-password" placeholder={settings?.has_user_token ? '留空以保留现有 Token' : '请输入 2_ 开头的 Token'} />
+                <Input.Password autoComplete="new-password" placeholder={settings?.has_user_token ? '留空以保留现有 Token' : '2_ Token 或完整 Base64 Authorization'} />
               </Form.Item>
               {settings?.has_user_token && (
                 <Button danger type="text" icon={<DeleteOutlined />} onClick={clearUserToken}>清除 Token</Button>
@@ -186,8 +208,8 @@ export function SettingsPage(): ReactNode {
                   </Form.Item>
                 </Col>
               </Row>
-              <Form.Item name="task_keywords" label="任务关键词" rules={[{ required: true, message: '至少添加一个关键词' }]} extra="输入关键词后按回车添加">
-                <Select mode="tags" tokenSeparators={[',', '，']} placeholder="例如：晚归" open={false} />
+              <Form.Item name="task_keywords" label="任务关键词" extra="可留空；空列表表示自动签到不匹配任何任务。输入关键词后按回车添加">
+                <Select mode="tags" tokenSeparators={[',', '，']} placeholder="可留空，例如：晚归" open={false} />
               </Form.Item>
               <Form.Item name="image_mode" label="图片策略" rules={[{ required: true }]}>
                 <Radio.Group className="responsive-radio-group">

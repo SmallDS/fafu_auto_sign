@@ -12,7 +12,11 @@
 docker compose -f web/docker-compose.yml up -d --build
 ```
 
-打开 <http://localhost:8000>，先上传签到图片，再进入设置页填写 Token 和图片策略。服务仅启动一个 Uvicorn worker，禁止增加副本或水平扩容，否则可能重复签到。
+打开 <http://localhost:8000>，先上传签到图片，再进入设置页填写 Token 和图片策略。
+
+设置页的“用户 Token / Authorization”支持两种输入：直接填写以 2_ 开头的 USER_TOKEN，或粘贴数字 FAFU 请求头中的完整 Base64 Authorization。完整值会由后端严格校验并仅提取、保存末段 USER_TOKEN；原始 Authorization 不会持久化或出现在错误响应中。
+
+服务仅启动一个 Uvicorn worker，禁止增加副本或水平扩容，否则可能重复签到。
 
 查看状态与日志：
 
@@ -47,7 +51,10 @@ docker compose -f web/docker-compose.yml down
 3. 项目根目录 `config.json`
 
 可访问的旧图片会复制到持久图库，原文件不会删除。导入完成后 Web 模式只读取 SQLite。现有 FAFU 明文 HTTP 地址、签名、端点、请求头和参数均未改变，且基础地址不会出现在管理页面或 API 中。
+
 ## 签到任务
+
+Web 自动签到的任务关键词默认为空；空列表不会匹配任何任务，填写一个或多个关键词后才会由后台自动匹配并签到。
 
 管理台的“签到任务”页面直接读取 FAFU 未签到任务分页列表，不受自动签到关键词过滤影响。可查看任务签到位置，并对当前仍在有效时间内的单个任务手动提交签到。提交前服务会重新读取任务来源页确认任务仍有效，随后严格按“详情 → 图片上传 → 签到提交”的既有流程执行。
 

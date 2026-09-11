@@ -49,7 +49,7 @@ def build_app_config(session: Session, settings: Settings) -> AppConfig:
         image_path_value = str(image_path(selected))
         latest_image_dir = str(LATEST_DIR)
 
-    return AppConfig(
+    config = AppConfig(
         user_token=settings.user_token,
         jitter=settings.jitter,
         image_path=image_path_value,
@@ -63,7 +63,10 @@ def build_app_config(session: Session, settings: Settings) -> AppConfig:
         wechat_test_app_secret=settings.wechat_test_app_secret,
         wechat_test_template_id=settings.wechat_test_template_id,
         wechat_test_openid=settings.wechat_test_openid,
-        task_keywords=json.loads(settings.task_keywords_json),
+    )
+    # Empty keywords are Web-only; keep the core AppConfig defaults and CLI validation unchanged.
+    return config.model_copy(
+        update={"task_keywords": json.loads(settings.task_keywords_json)}
     )
 
 

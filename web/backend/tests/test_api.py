@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from io import BytesIO
 
 from fastapi.testclient import TestClient
@@ -80,3 +81,30 @@ def test_unconfigured_health_settings_and_atomic_image_upload() -> None:
         assert persisted.json()["configured"] is True
         assert persisted.json()["selected_image_id"] == image_id
         assert restarted.get(f"/api/images/{image_id}").status_code == 200
+
+
+def test_settings_accepts_full_authorization_and_rejects_malformed_without_echo() -> None:
+    token = "2_api_authorization_token"
+    authorization = base64.b64encode(
+        f"1773238142:nonceForWebTest1:{'b' * 32}:{token}".encode()
+    ).decode()
+    invalid_authorization = base64.b64encode(
+        b"1773238142:sensitive-marker:not-a-signature:2_hidden"
+    ).decode()
+
+    with TestClient(app) as client:
+        saved = client.put("/api/settings", json={"user_token": authorization})
+        assert saved.status_code == 200
+        assert authorization not in saved.text
+        assert token not in saved.text
+        assert saved.json()["has_user_token"] is True
+
+        rejected = client.put(
+            "/api/settings",
+            json={"user_token": invalid_authorization},
+        )
+        assert rejected.status_code == 422
+        assert rejected.json()["detail"]["code"] == "VALIDATION_ERROR"
+        assert invalid_authorization not in rejected.text
+        assert "sensitive-marker" not in rejected.text
+        assert "2_hidden" not in rejected.text
