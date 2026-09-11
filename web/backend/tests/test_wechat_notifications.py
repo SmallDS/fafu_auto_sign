@@ -130,6 +130,10 @@ def test_migration_removes_legacy_notification_columns_and_preserves_data(
         "wechat_test_app_secret",
         "wechat_test_template_id",
         "wechat_test_openid",
+        "amap_enabled",
+        "amap_js_key",
+        "amap_security_js_code",
+        "amap_source_coordinate_system",
     } <= columns
     with engine.connect() as connection:
         row = connection.exec_driver_sql(
@@ -159,10 +163,13 @@ def test_migration_removes_legacy_notification_columns_and_preserves_data(
     """
     with engine.begin() as connection:
         connection.exec_driver_sql(required_values_sql, {"id": 2})
-        new_default = connection.exec_driver_sql(
-            "SELECT task_keywords_json FROM settings WHERE id = 2"
-        ).scalar_one()
-    assert new_default == "[]"
+        new_defaults = connection.exec_driver_sql(
+            """
+            SELECT task_keywords_json, amap_enabled, amap_source_coordinate_system
+            FROM settings WHERE id = 2
+            """
+        ).one()
+    assert tuple(new_defaults) == ("[]", 0, "gcj02")
 
     command.downgrade(config, "0003_remove_serverchan_notifications")
     with engine.begin() as connection:

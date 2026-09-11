@@ -4,6 +4,7 @@ import type {
   ImageCategory,
   ImageRecord,
   LogsResponse,
+  MapConfig,
   PageResponse,
   RunRecord,
   RunResult,
@@ -84,6 +85,7 @@ export const api = {
   updateSettings: (settings: SettingsUpdate): Promise<Settings> =>
     request('/settings', { method: 'PUT', body: JSON.stringify(settings) }),
   getStatus: (): Promise<StatusResponse> => request('/status'),
+  getMapConfig: (): Promise<MapConfig> => request('/map/config'),
   pauseWorker: (): Promise<ActionResponse> => request('/worker/pause', { method: 'POST' }),
   resumeWorker: (): Promise<ActionResponse> => request('/worker/resume', { method: 'POST' }),
   runNow: (): Promise<ActionResponse> => request('/worker/run-now', { method: 'POST' }),

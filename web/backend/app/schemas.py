@@ -11,6 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 ImageMode = Literal["single", "library", "latest"]
+AmapCoordinateSystem = Literal["gcj02", "wgs84"]
 RunStatus = Literal["no_task", "success", "partial", "failed", "fatal"]
 WorkerState = Literal["unconfigured", "idle", "executing", "paused", "error", "stopping"]
 
@@ -23,6 +24,11 @@ class SettingsRead(BaseModel):
     jitter: float
     heartbeat_interval: int
     log_level: str
+    amap_enabled: bool
+    amap_js_key: str | None
+    has_amap_security_js_code: bool
+    amap_security_js_code_masked: str | None
+    amap_source_coordinate_system: AmapCoordinateSystem
     wechat_test_enabled: bool
     wechat_test_app_id: str | None
     wechat_test_template_id: str | None
@@ -42,6 +48,11 @@ class SettingsUpdate(BaseModel):
     jitter: float | None = Field(default=None, ge=0, le=0.001)
     heartbeat_interval: int | None = Field(default=None, ge=10, le=86400)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None = None
+    amap_enabled: bool | None = None
+    amap_js_key: str | None = None
+    amap_security_js_code: str | None = None
+    clear_amap_security_js_code: bool = False
+    amap_source_coordinate_system: AmapCoordinateSystem | None = None
     wechat_test_enabled: bool | None = None
     wechat_test_app_id: str | None = None
     wechat_test_app_secret: str | None = None
@@ -87,6 +98,13 @@ class SettingsUpdate(BaseModel):
             raise ValueError(message)
         return parts[3]
 
+    @field_validator("amap_js_key", "amap_security_js_code")
+    @classmethod
+    def trim_amap_credentials(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return value.strip()
+
     @field_validator("task_keywords")
     @classmethod
     def validate_keywords(cls, value: list[str] | None) -> list[str] | None:
@@ -98,7 +116,17 @@ class SettingsUpdate(BaseModel):
     def validate_secret_actions(self) -> "SettingsUpdate":
         if self.clear_user_token and self.user_token:
             raise ValueError("不能同时设置并清除 Token")
+        if self.clear_amap_security_js_code and self.amap_security_js_code:
+            raise ValueError("不能同时设置并清除高德 Security JS Code")
         return self
+
+
+class MapConfigRead(BaseModel):
+    enabled: bool
+    js_key: str | None
+    source_coordinate_system: AmapCoordinateSystem
+    jitter: float
+    service_host: str = "/_AMapService"
 
 
 class ImageRead(BaseModel):

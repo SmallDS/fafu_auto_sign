@@ -48,6 +48,11 @@ def settings_to_read(session: Session, settings: Settings) -> SettingsRead:
         jitter=settings.jitter,
         heartbeat_interval=settings.heartbeat_interval,
         log_level=settings.log_level,
+        amap_enabled=settings.amap_enabled,
+        amap_js_key=settings.amap_js_key,
+        has_amap_security_js_code=bool(settings.amap_security_js_code),
+        amap_security_js_code_masked=mask_secret(settings.amap_security_js_code),
+        amap_source_coordinate_system=settings.amap_source_coordinate_system,  # type: ignore[arg-type]
         wechat_test_enabled=settings.wechat_test_enabled,
         wechat_test_app_id=settings.wechat_test_app_id,
         wechat_test_template_id=settings.wechat_test_template_id,
@@ -72,6 +77,16 @@ def update_settings(session: Session, payload: SettingsUpdate) -> Settings:
     elif "user_token" in fields_set and payload.user_token:
         settings.user_token = payload.user_token
 
+    if payload.clear_amap_security_js_code:
+        settings.amap_security_js_code = None
+        settings.amap_enabled = False
+    elif "amap_security_js_code" in fields_set and payload.amap_security_js_code:
+        settings.amap_security_js_code = payload.amap_security_js_code
+    if "amap_js_key" in fields_set and payload.amap_js_key is not None:
+        settings.amap_js_key = payload.amap_js_key or None
+        if not settings.amap_js_key:
+            settings.amap_enabled = False
+
     if payload.clear_wechat_test_app_secret:
         settings.wechat_test_app_secret = None
         settings.wechat_test_enabled = False
@@ -87,6 +102,8 @@ def update_settings(session: Session, payload: SettingsUpdate) -> Settings:
         "jitter",
         "heartbeat_interval",
         "log_level",
+        "amap_enabled",
+        "amap_source_coordinate_system",
         "wechat_test_enabled",
         "wechat_test_app_id",
         "wechat_test_template_id",
@@ -105,6 +122,10 @@ def update_settings(session: Session, payload: SettingsUpdate) -> Settings:
             raise ValueError("选择的图片不存在")
         settings.current_image_id = payload.selected_image_id
 
+    if settings.amap_enabled and not all(
+        (settings.amap_js_key, settings.amap_security_js_code)
+    ):
+        raise ValueError("启用高德地图前必须完整配置 JS Key 和 Security JS Code")
     if settings.wechat_test_enabled and not all((
         settings.wechat_test_app_id,
         settings.wechat_test_app_secret,

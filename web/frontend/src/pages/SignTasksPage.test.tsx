@@ -8,6 +8,7 @@ vi.mock('../api/client', () => ({
   api: {
     listSignTasks: vi.fn(),
     getSignTask: vi.fn(),
+    getMapConfig: vi.fn(),
     submitSignTask: vi.fn(),
   },
   getErrorMessage: (error: unknown) => error instanceof Error ? error.message : '错误',
@@ -32,6 +33,12 @@ describe('SignTasksPage', () => {
       base_lng: 118.1,
       base_lat: 25.1,
       position_name: '宿舍楼',
+    });    mockedApi.getMapConfig.mockResolvedValue({
+      enabled: false,
+      js_key: null,
+      source_coordinate_system: 'gcj02',
+      jitter: 0,
+      service_host: '/_AMapService',
     });
     mockedApi.submitSignTask.mockResolvedValue({
       id: 1,
@@ -61,6 +68,8 @@ describe('SignTasksPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /详情/ }));
     expect(await screen.findByText('宿舍楼')).toBeInTheDocument();
     expect(mockedApi.getSignTask).toHaveBeenCalledWith('123');
+    expect(mockedApi.getMapConfig).toHaveBeenCalledOnce();
+    expect(await screen.findByText('高德地图未启用')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /签到/ }));
     fireEvent.click(await screen.findByRole('button', { name: '确认签到' }));

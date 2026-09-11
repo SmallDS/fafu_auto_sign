@@ -65,7 +65,6 @@ export function AppShell({ children }: AppShellProps): ReactNode {
         <Sider width={232} theme="light" className="app-sider">
           <div className="sider-brand"><Brand /></div>
           {navigation}
-          <div className="trusted-network-note">仅供可信局域网使用</div>
         </Sider>
       )}
       <Layout>
@@ -91,7 +90,6 @@ export function AppShell({ children }: AppShellProps): ReactNode {
         styles={{ body: { padding: '8px 12px' } }}
       >
         {navigation}
-        <div className="trusted-network-note drawer-note">仅供可信局域网使用</div>
       </Drawer>
     </Layout>
   );

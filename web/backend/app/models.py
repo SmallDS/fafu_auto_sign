@@ -23,6 +23,12 @@ class Settings(Base):
     jitter: Mapped[float] = mapped_column(Float, nullable=False, default=0.00005)
     heartbeat_interval: Mapped[int] = mapped_column(Integer, nullable=False, default=900)
     log_level: Mapped[str] = mapped_column(String(16), nullable=False, default="INFO")
+    amap_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    amap_js_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    amap_security_js_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    amap_source_coordinate_system: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="gcj02"
+    )
     wechat_test_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     wechat_test_app_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     wechat_test_app_secret: Mapped[str | None] = mapped_column(Text, nullable=True)

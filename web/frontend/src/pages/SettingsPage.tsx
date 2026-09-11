@@ -19,7 +19,13 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { AsyncState } from '../components/AsyncState';
 import { PageHeading } from '../components/PageHeading';
-import type { ImageMode, LogLevel, Settings, SettingsUpdate } from '../types/api';
+import type {
+  AmapCoordinateSystem,
+  ImageMode,
+  LogLevel,
+  Settings,
+  SettingsUpdate,
+} from '../types/api';
 
 const USER_TOKEN_INPUT_ERROR = '请输入 2_ 开头的 Token 或完整 Base64 Authorization';
 
@@ -53,6 +59,10 @@ interface SettingsForm {
   jitter: number;
   heartbeat_interval: number;
   log_level: LogLevel;
+  amap_enabled: boolean;
+  amap_js_key?: string;
+  amap_security_js_code?: string;
+  amap_source_coordinate_system: AmapCoordinateSystem;
   task_keywords?: string[];
   image_mode: ImageMode;
 }
@@ -65,6 +75,7 @@ export function SettingsPage(): ReactNode {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const imageMode = Form.useWatch('image_mode', form);
+  const amapEnabled = Form.useWatch('amap_enabled', form);
   const wechatTestEnabled = Form.useWatch('wechat_test_enabled', form);
 
   const load = async (): Promise<void> => {
@@ -75,6 +86,10 @@ export function SettingsPage(): ReactNode {
         jitter: value.jitter,
         heartbeat_interval: value.heartbeat_interval,
         log_level: value.log_level,
+        amap_enabled: value.amap_enabled,
+        amap_js_key: value.amap_js_key ?? '',
+        amap_security_js_code: '',
+        amap_source_coordinate_system: value.amap_source_coordinate_system,
         wechat_test_enabled: value.wechat_test_enabled,
         wechat_test_app_id: value.wechat_test_app_id ?? '',
         wechat_test_template_id: value.wechat_test_template_id ?? '',
@@ -101,6 +116,9 @@ export function SettingsPage(): ReactNode {
       jitter: values.jitter,
       heartbeat_interval: values.heartbeat_interval,
       log_level: values.log_level,
+      amap_enabled: values.amap_enabled,
+      amap_js_key: values.amap_js_key?.trim() ?? '',
+      amap_source_coordinate_system: values.amap_source_coordinate_system,
       wechat_test_enabled: values.wechat_test_enabled,
       wechat_test_app_id: values.wechat_test_app_id?.trim(),
       wechat_test_template_id: values.wechat_test_template_id?.trim(),
@@ -108,6 +126,9 @@ export function SettingsPage(): ReactNode {
       image_mode: values.image_mode,
     };
     if (values.user_token?.trim()) payload.user_token = values.user_token.trim();
+    if (values.amap_security_js_code?.trim()) {
+      payload.amap_security_js_code = values.amap_security_js_code.trim();
+    }
     if (values.wechat_test_app_secret?.trim()) payload.wechat_test_app_secret = values.wechat_test_app_secret.trim();
     if (values.wechat_test_openid?.trim()) payload.wechat_test_openid = values.wechat_test_openid.trim();
 
@@ -115,7 +136,12 @@ export function SettingsPage(): ReactNode {
     try {
       const next = await api.updateSettings(payload);
       setSettings(next);
-      form.setFieldsValue({ user_token: '', wechat_test_app_secret: '', wechat_test_openid: '' });
+      form.setFieldsValue({
+        user_token: '',
+        amap_security_js_code: '',
+        wechat_test_app_secret: '',
+        wechat_test_openid: '',
+      });
       message.success('设置已保存，后台任务将自动加载新配置');
     } catch (nextError) {
       message.error(getErrorMessage(nextError));
@@ -142,6 +168,26 @@ export function SettingsPage(): ReactNode {
       },
     });
   };
+  const clearAmapSecurityCode = (): void => {
+    modal.confirm({
+      title: '确认清除高德 Security JS Code？',
+      content: '清除后高德地图会自动关闭，签到功能不受影响。',
+      okText: '清除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const next = await api.updateSettings({ clear_amap_security_js_code: true });
+          setSettings(next);
+          form.setFieldsValue({ amap_enabled: false, amap_security_js_code: '' });
+          message.success('高德 Security JS Code 已清除');
+        } catch (nextError) {
+          message.error(getErrorMessage(nextError));
+        }
+      },
+    });
+  };
+
   const clearWechatSecret = (kind: 'app_secret' | 'openid'): void => {
     const label = kind === 'app_secret' ? 'AppSecret' : 'OpenID';
     modal.confirm({
@@ -181,7 +227,6 @@ export function SettingsPage(): ReactNode {
         <Form form={form} layout="vertical" requiredMark="optional" onFinish={(values) => void save(values)}>
           <Space direction="vertical" size={16} className="full-width">
             <Card title="账号凭据" className="content-card">
-              <Alert type="warning" showIcon message="敏感信息以明文保存在 SQLite 中，请只在可信局域网使用管理台。" className="section-alert" />
               <Form.Item
                 name="user_token"
                 label="用户 Token / Authorization"
@@ -226,6 +271,66 @@ export function SettingsPage(): ReactNode {
                   description="固定图片需要在“图片”页选择。"
                   action={<Button href="/images" size="small">管理图片</Button>}
                 />
+              )}
+            </Card>
+
+            <Card title="高德地图" className="content-card">
+              <Alert
+                type="info"
+                showIcon
+                className="section-alert"
+                message="地图仅用于展示和距离计算"
+                description="JS Key 会提供给浏览器，请在高德控制台限制可用域名；Security JS Code 仅由后端代理使用。地图不会改变 FAFU 签到坐标。"
+              />
+              <Form.Item name="amap_enabled" label="高德地图" valuePropName="checked">
+                <Switch checkedChildren="已启用" unCheckedChildren="已关闭" />
+              </Form.Item>
+              {amapEnabled && (
+                <>
+                  <Form.Item
+                    name="amap_js_key"
+                    label="Web 端 JS API Key"
+                    rules={[{ required: true, whitespace: true, message: '请输入高德 JS Key' }]}
+                    extra="Key 会在浏览器中使用，请为部署域名或 IP 配置白名单。"
+                  >
+                    <Input autoComplete="off" placeholder="高德 Web 端（JS API）Key" />
+                  </Form.Item>
+                  <Form.Item
+                    name="amap_security_js_code"
+                    label="Security JS Code"
+                    rules={[{
+                      required: !settings?.has_amap_security_js_code,
+                      whitespace: true,
+                      message: '请输入 Security JS Code',
+                    }]}
+                    extra={settings?.has_amap_security_js_code
+                      ? '已保存：' + (settings.amap_security_js_code_masked ?? '******') + '；留空不修改'
+                      : '安全密钥将保存在 SQLite，并由 FastAPI 代理注入'}
+                  >
+                    <Input.Password
+                      autoComplete="new-password"
+                      placeholder={settings?.has_amap_security_js_code
+                        ? '留空以保留现有 Security JS Code'
+                        : 'Security JS Code'}
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="amap_source_coordinate_system"
+                    label="FAFU 源坐标系"
+                    rules={[{ required: true }]}
+                    extra="只影响地图显示、地址解析和距离计算；签到仍提交 FAFU 原始坐标。"
+                  >
+                    <Radio.Group className="responsive-radio-group">
+                      <Radio.Button value="gcj02">GCJ-02（默认）</Radio.Button>
+                      <Radio.Button value="wgs84">WGS-84</Radio.Button>
+                    </Radio.Group>
+                  </Form.Item>
+                  {settings?.has_amap_security_js_code && (
+                    <Button danger type="text" icon={<DeleteOutlined />} onClick={clearAmapSecurityCode}>
+                      清除 Security JS Code
+                    </Button>
+                  )}
+                </>
               )}
             </Card>
 

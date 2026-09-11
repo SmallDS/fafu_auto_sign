@@ -1,5 +1,6 @@
 export type WorkerState = 'unconfigured' | 'idle' | 'executing' | 'paused' | 'error' | 'stopping';
 export type ImageMode = 'single' | 'library' | 'latest';
+export type AmapCoordinateSystem = 'gcj02' | 'wgs84';
 export type ImageCategory = 'library' | 'latest';
 export type RunResult = 'no_task' | 'success' | 'partial' | 'failed' | 'fatal';
 export type RunTrigger = 'scheduled' | 'manual';
@@ -20,6 +21,11 @@ export interface Settings {
   jitter: number;
   heartbeat_interval: number;
   log_level: LogLevel;
+  amap_enabled: boolean;
+  amap_js_key: string | null;
+  has_amap_security_js_code: boolean;
+  amap_security_js_code_masked: string | null;
+  amap_source_coordinate_system: AmapCoordinateSystem;
   task_keywords: string[];
   image_mode: ImageMode;
   selected_image_id: string | null;
@@ -39,6 +45,11 @@ export interface SettingsUpdate {
   jitter?: number;
   heartbeat_interval?: number;
   log_level?: LogLevel;
+  amap_enabled?: boolean;
+  amap_js_key?: string;
+  amap_security_js_code?: string;
+  clear_amap_security_js_code?: boolean;
+  amap_source_coordinate_system?: AmapCoordinateSystem;
   task_keywords?: string[];
   image_mode?: ImageMode;
   selected_image_id?: string | null;
@@ -116,6 +127,14 @@ export interface SignTaskPage {
   page: number;
   page_size: number;
   has_more: boolean;
+}
+
+export interface MapConfig {
+  enabled: boolean;
+  js_key: string | null;
+  source_coordinate_system: AmapCoordinateSystem;
+  jitter: number;
+  service_host: string;
 }
 
 export interface SignTaskDetails {

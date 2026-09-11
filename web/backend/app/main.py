@@ -10,11 +10,19 @@ from typing import Annotated, AsyncIterator, Literal
 
 from fastapi import Depends, FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+from app.amap_proxy import (
+    AmapProxyError,
+    AmapResponseTooLarge,
+    AmapUpstreamUnavailable,
+    UnsupportedAmapPath,
+    install_amap_access_log_filter,
+    proxy_amap_request,
+)
 from app.database import SessionLocal, get_db, run_migrations
 from app.errors import ConfigurationIncomplete, api_error
 from app.image_store import MAX_UPLOAD_FILES, InvalidImage, store_upload
@@ -45,6 +53,7 @@ from app.schemas import (
     ImagePage,
     ImageRead,
     LogPage,
+    MapConfigRead,
     RunPage,
     RunRead,
     SettingsRead,
@@ -76,6 +85,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         settings = get_or_create_settings(session)
         log_level = settings.log_level
     setup_logging(log_level, log_dir=str(LOG_DIR))
+    install_amap_access_log_filter()
     worker.start()
     try:
         yield
@@ -123,6 +133,51 @@ def put_settings(payload: SettingsUpdate, session: DbSession) -> SettingsRead:
         raise api_error(422, "VALIDATION_ERROR", "配置校验失败", {"settings": str(exc)}) from exc
     worker.notify_configuration_changed()
     return settings_to_read(session, settings)
+
+
+@app.get("/api/map/config", response_model=MapConfigRead)
+def map_config(session: DbSession) -> MapConfigRead:
+    settings = get_or_create_settings(session)
+    enabled = bool(
+        settings.amap_enabled
+        and settings.amap_js_key
+        and settings.amap_security_js_code
+    )
+    return MapConfigRead(
+        enabled=enabled,
+        js_key=settings.amap_js_key if enabled else None,
+        source_coordinate_system=settings.amap_source_coordinate_system,  # type: ignore[arg-type]
+        jitter=settings.jitter,
+    )
+
+
+@app.get("/_AMapService/{service_path:path}", response_model=None)
+def amap_service_proxy(
+    service_path: str,
+    request: Request,
+    session: DbSession,
+) -> Response:
+    settings = get_or_create_settings(session)
+    if not (
+        settings.amap_enabled
+        and settings.amap_js_key
+        and settings.amap_security_js_code
+    ):
+        raise api_error(409, "AMAP_NOT_CONFIGURED", "高德地图尚未启用或配置不完整")
+    try:
+        return proxy_amap_request(
+            service_path,
+            request.query_params.multi_items(),
+            settings.amap_security_js_code,
+        )
+    except UnsupportedAmapPath as exc:
+        raise api_error(404, "AMAP_PATH_NOT_ALLOWED", "不支持的高德服务路径") from exc
+    except AmapResponseTooLarge as exc:
+        raise api_error(502, "AMAP_RESPONSE_TOO_LARGE", "高德服务响应过大") from exc
+    except AmapUpstreamUnavailable as exc:
+        raise api_error(502, "AMAP_UPSTREAM_ERROR", "无法连接高德地图服务") from exc
+    except AmapProxyError as exc:
+        raise api_error(502, "AMAP_PROXY_ERROR", "高德地图代理请求失败") from exc
 
 
 @app.get("/api/status", response_model=StatusResponse)

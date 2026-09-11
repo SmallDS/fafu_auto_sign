@@ -18,10 +18,18 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
+import { AmapTaskMap } from '../components/AmapTaskMap';
 import { PageHeading } from '../components/PageHeading';
-import type { SignTask, SignTaskDetails } from '../types/api';
+import type { MapConfig, SignTask, SignTaskDetails } from '../types/api';
 
 const PAGE_SIZE = 20;
+const DISABLED_MAP_CONFIG: MapConfig = {
+  enabled: false,
+  js_key: null,
+  source_coordinate_system: 'gcj02',
+  jitter: 0,
+  service_host: '/_AMapService',
+};
 
 function formatTime(value: number): string {
   return dayjs(value).format('YYYY-MM-DD HH:mm:ss');
@@ -42,6 +50,7 @@ export function SignTasksPage(): ReactNode {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [details, setDetails] = useState<SignTaskDetails | null>(null);
+  const [mapConfig, setMapConfig] = useState<MapConfig | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
@@ -67,9 +76,16 @@ export function SignTasksPage(): ReactNode {
   const openDetails = async (task: SignTask): Promise<void> => {
     setDetailOpen(true);
     setDetails(null);
+    setMapConfig(null);
     setDetailLoading(true);
     try {
-      setDetails(await api.getSignTask(task.id));
+      const nextDetails = await api.getSignTask(task.id);
+      setDetails(nextDetails);
+      try {
+        setMapConfig(await api.getMapConfig());
+      } catch {
+        setMapConfig(DISABLED_MAP_CONFIG);
+      }
     } catch (error) {
       message.error(getErrorMessage(error));
       setDetailOpen(false);
@@ -188,17 +204,20 @@ export function SignTasksPage(): ReactNode {
         title="签到任务详情"
         open={detailOpen}
         loading={detailLoading}
-        width={mobile ? '100%' : 520}
+        width={mobile ? '100%' : 680}
         onClose={() => setDetailOpen(false)}
       >
         {details && (
-          <Descriptions bordered size="small" column={1}>
-            <Descriptions.Item label="任务 ID">{details.task_id}</Descriptions.Item>
-            <Descriptions.Item label="签到位置">{details.position_name || '—'}</Descriptions.Item>
-            <Descriptions.Item label="位置 ID">{details.position_id}</Descriptions.Item>
-            <Descriptions.Item label="经度">{details.base_lng}</Descriptions.Item>
-            <Descriptions.Item label="纬度">{details.base_lat}</Descriptions.Item>
-          </Descriptions>
+          <Space direction="vertical" size={16} className="full-width">
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="任务 ID">{details.task_id}</Descriptions.Item>
+              <Descriptions.Item label="签到位置">{details.position_name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="位置 ID">{details.position_id}</Descriptions.Item>
+              <Descriptions.Item label="经度">{details.base_lng}</Descriptions.Item>
+              <Descriptions.Item label="纬度">{details.base_lat}</Descriptions.Item>
+            </Descriptions>
+            {mapConfig && <AmapTaskMap details={details} config={mapConfig} />}
+          </Space>
         )}
       </Drawer>
     </div>
