@@ -59,7 +59,6 @@ def test_amap_settings_are_masked_preserved_and_cleared(db_session: Session) -> 
             amap_enabled=True,
             amap_js_key=" public-js-key ",
             amap_security_js_code=" private-security-code ",
-            amap_source_coordinate_system="wgs84",
         ),
     )
     public = settings_to_read(db_session, settings)
@@ -68,14 +67,14 @@ def test_amap_settings_are_masked_preserved_and_cleared(db_session: Session) -> 
     assert settings.amap_security_js_code == "private-security-code"
     assert public.amap_enabled is True
     assert public.amap_js_key == "public-js-key"
-    assert public.amap_source_coordinate_system == "wgs84"
     assert public.has_amap_security_js_code is True
     assert public.amap_security_js_code_masked != "private-security-code"
     assert "amap_security_js_code" not in public.model_dump()
+    assert "amap_source_coordinate_system" not in public.model_dump()
 
     preserved = update_settings(
         db_session,
-        SettingsUpdate(amap_security_js_code="", amap_source_coordinate_system="gcj02"),
+        SettingsUpdate(amap_security_js_code=""),
     )
     assert preserved.amap_security_js_code == "private-security-code"
 
@@ -137,7 +136,6 @@ def test_map_config_and_proxy_inject_server_secret_without_leaking_it(
     assert config.json() == {
         "enabled": True,
         "js_key": "browser-visible-key",
-        "source_coordinate_system": "gcj02",
         "jitter": 0.00005,
         "service_host": "/_AMapService",
     }

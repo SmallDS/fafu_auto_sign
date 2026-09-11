@@ -20,7 +20,6 @@ import { api, getErrorMessage } from '../api/client';
 import { AsyncState } from '../components/AsyncState';
 import { PageHeading } from '../components/PageHeading';
 import type {
-  AmapCoordinateSystem,
   ImageMode,
   LogLevel,
   Settings,
@@ -62,7 +61,6 @@ interface SettingsForm {
   amap_enabled: boolean;
   amap_js_key?: string;
   amap_security_js_code?: string;
-  amap_source_coordinate_system: AmapCoordinateSystem;
   task_keywords?: string[];
   image_mode: ImageMode;
 }
@@ -89,7 +87,6 @@ export function SettingsPage(): ReactNode {
         amap_enabled: value.amap_enabled,
         amap_js_key: value.amap_js_key ?? '',
         amap_security_js_code: '',
-        amap_source_coordinate_system: value.amap_source_coordinate_system,
         wechat_test_enabled: value.wechat_test_enabled,
         wechat_test_app_id: value.wechat_test_app_id ?? '',
         wechat_test_template_id: value.wechat_test_template_id ?? '',
@@ -118,7 +115,6 @@ export function SettingsPage(): ReactNode {
       log_level: values.log_level,
       amap_enabled: values.amap_enabled,
       amap_js_key: values.amap_js_key?.trim() ?? '',
-      amap_source_coordinate_system: values.amap_source_coordinate_system,
       wechat_test_enabled: values.wechat_test_enabled,
       wechat_test_app_id: values.wechat_test_app_id?.trim(),
       wechat_test_template_id: values.wechat_test_template_id?.trim(),
@@ -313,17 +309,6 @@ export function SettingsPage(): ReactNode {
                         ? '留空以保留现有 Security JS Code'
                         : 'Security JS Code'}
                     />
-                  </Form.Item>
-                  <Form.Item
-                    name="amap_source_coordinate_system"
-                    label="FAFU 源坐标系"
-                    rules={[{ required: true }]}
-                    extra="只影响地图显示、地址解析和距离计算；签到仍提交 FAFU 原始坐标。"
-                  >
-                    <Radio.Group className="responsive-radio-group">
-                      <Radio.Button value="gcj02">GCJ-02（默认）</Radio.Button>
-                      <Radio.Button value="wgs84">WGS-84</Radio.Button>
-                    </Radio.Group>
                   </Form.Item>
                   {settings?.has_amap_security_js_code && (
                     <Button danger type="text" icon={<DeleteOutlined />} onClick={clearAmapSecurityCode}>

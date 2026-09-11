@@ -26,7 +26,6 @@ const PAGE_SIZE = 20;
 const DISABLED_MAP_CONFIG: MapConfig = {
   enabled: false,
   js_key: null,
-  source_coordinate_system: 'gcj02',
   jitter: 0,
   service_host: '/_AMapService',
 };

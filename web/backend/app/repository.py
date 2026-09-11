@@ -52,7 +52,6 @@ def settings_to_read(session: Session, settings: Settings) -> SettingsRead:
         amap_js_key=settings.amap_js_key,
         has_amap_security_js_code=bool(settings.amap_security_js_code),
         amap_security_js_code_masked=mask_secret(settings.amap_security_js_code),
-        amap_source_coordinate_system=settings.amap_source_coordinate_system,  # type: ignore[arg-type]
         wechat_test_enabled=settings.wechat_test_enabled,
         wechat_test_app_id=settings.wechat_test_app_id,
         wechat_test_template_id=settings.wechat_test_template_id,
@@ -103,7 +102,6 @@ def update_settings(session: Session, payload: SettingsUpdate) -> Settings:
         "heartbeat_interval",
         "log_level",
         "amap_enabled",
-        "amap_source_coordinate_system",
         "wechat_test_enabled",
         "wechat_test_app_id",
         "wechat_test_template_id",

@@ -12,7 +12,6 @@ const settings = {
   amap_js_key: null,
   has_amap_security_js_code: false,
   amap_security_js_code_masked: null,
-  amap_source_coordinate_system: 'gcj02',
   wechat_test_enabled: false,
   wechat_test_app_id: null,
   wechat_test_template_id: null,
@@ -36,7 +35,6 @@ async function mockApi(page: Page): Promise<void> {
       body = {
         enabled: true,
         js_key: 'browser-visible-key',
-        source_coordinate_system: 'gcj02',
         jitter: 0.00005,
         service_host: '/_AMapService',
       };

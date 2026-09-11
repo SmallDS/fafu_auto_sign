@@ -36,7 +36,6 @@ describe('SignTasksPage', () => {
     });    mockedApi.getMapConfig.mockResolvedValue({
       enabled: false,
       js_key: null,
-      source_coordinate_system: 'gcj02',
       jitter: 0,
       service_host: '/_AMapService',
     });

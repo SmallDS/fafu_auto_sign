@@ -11,7 +11,6 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 ImageMode = Literal["single", "library", "latest"]
-AmapCoordinateSystem = Literal["gcj02", "wgs84"]
 RunStatus = Literal["no_task", "success", "partial", "failed", "fatal"]
 WorkerState = Literal["unconfigured", "idle", "executing", "paused", "error", "stopping"]
 
@@ -28,7 +27,6 @@ class SettingsRead(BaseModel):
     amap_js_key: str | None
     has_amap_security_js_code: bool
     amap_security_js_code_masked: str | None
-    amap_source_coordinate_system: AmapCoordinateSystem
     wechat_test_enabled: bool
     wechat_test_app_id: str | None
     wechat_test_template_id: str | None
@@ -52,7 +50,6 @@ class SettingsUpdate(BaseModel):
     amap_js_key: str | None = None
     amap_security_js_code: str | None = None
     clear_amap_security_js_code: bool = False
-    amap_source_coordinate_system: AmapCoordinateSystem | None = None
     wechat_test_enabled: bool | None = None
     wechat_test_app_id: str | None = None
     wechat_test_app_secret: str | None = None
@@ -124,7 +121,6 @@ class SettingsUpdate(BaseModel):
 class MapConfigRead(BaseModel):
     enabled: bool
     js_key: str | None
-    source_coordinate_system: AmapCoordinateSystem
     jitter: float
     service_host: str = "/_AMapService"
 

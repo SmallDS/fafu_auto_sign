@@ -24,7 +24,6 @@ const details: SignTaskDetails = {
 const enabledConfig: MapConfig = {
   enabled: true,
   js_key: 'browser-key',
-  source_coordinate_system: 'gcj02',
   jitter: 0.00005,
   service_host: '/_AMapService',
 };
@@ -133,7 +132,7 @@ describe('AmapTaskMap helpers', () => {
     expect(isGeolocationContextAllowed(true, 'example.test', false)).toBe(false);
   });
 
-  it('严格处理 WGS-84 转换成功和失败', async () => {
+  it('严格处理浏览器定位坐标转换成功和失败', async () => {
     const { amap } = installAmapMock();
     const converted = await convertGpsCoordinate(amap, [118.1, 25.1]);
     expect(converted[0]).toBeCloseTo(118.11, 8);

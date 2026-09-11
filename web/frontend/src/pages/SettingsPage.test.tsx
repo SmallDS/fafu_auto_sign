@@ -26,7 +26,6 @@ const emptyKeywordSettings: Settings = {
   amap_js_key: null,
   has_amap_security_js_code: false,
   amap_security_js_code_masked: null,
-  amap_source_coordinate_system: 'gcj02',
   wechat_test_enabled: false,
   wechat_test_app_id: null,
   wechat_test_template_id: null,
@@ -74,13 +73,13 @@ describe('SettingsPage WeChat test account', () => {
     expect(await screen.findByText('地图仅用于展示和距离计算')).toBeInTheDocument();
     expect(await screen.findByDisplayValue('browser-visible-key')).toBeInTheDocument();
     expect(screen.getByText(/Security JS Code 仅由后端代理使用/)).toBeInTheDocument();
+    expect(screen.queryByText('FAFU 源坐标系')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /保存设置/ }));
     await waitFor(() => {
       expect(mockedApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
         amap_enabled: true,
         amap_js_key: 'browser-visible-key',
-        amap_source_coordinate_system: 'gcj02',
       }));
     });
     const payload = mockedApi.updateSettings.mock.calls[0][0];

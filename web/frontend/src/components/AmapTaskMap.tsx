@@ -244,12 +244,8 @@ export function AmapTaskMap({ details, config }: AmapTaskMapProps): ReactNode {
               [details.base_lng - config.jitter, details.base_lat + config.jitter],
             ]
           : [];
-        const taskCoordinate = config.source_coordinate_system === 'wgs84'
-          ? await convertGpsCoordinate(amap, rawTask)
-          : rawTask;
-        const displayBounds = config.source_coordinate_system === 'wgs84'
-          ? await Promise.all(rawBounds.map((coordinate) => convertGpsCoordinate(amap, coordinate)))
-          : rawBounds;
+        const taskCoordinate = rawTask;
+        const displayBounds = rawBounds;
         if (cancelled || !containerRef.current) return;
 
         map = new amap.Map(containerRef.current, {
@@ -316,7 +312,6 @@ export function AmapTaskMap({ details, config }: AmapTaskMapProps): ReactNode {
     config.jitter,
     config.js_key,
     config.service_host,
-    config.source_coordinate_system,
     details.base_lat,
     details.base_lng,
     details.position_name,

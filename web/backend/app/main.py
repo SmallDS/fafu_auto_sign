@@ -146,7 +146,6 @@ def map_config(session: DbSession) -> MapConfigRead:
     return MapConfigRead(
         enabled=enabled,
         js_key=settings.amap_js_key if enabled else None,
-        source_coordinate_system=settings.amap_source_coordinate_system,  # type: ignore[arg-type]
         jitter=settings.jitter,
     )
 
