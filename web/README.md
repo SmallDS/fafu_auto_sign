@@ -8,11 +8,15 @@ FastAPI、全局签到队列和 Ant Design 前端运行在同一个容器中。�
 
 - 微信公众号接口测试号 AppID、AppSecret 和模板 ID
 - 已备案并能访问本服务的公网 HTTPS 地址
-- 把 `{公网地址}/auth/wechat/callback` 配置为网页授权回调域名
+- 在测试号“网页授权获取用户基本信息”中只填写公网域名（例如 `sign.example.com`），不要填写协议、端口或 `/auth/wechat/callback` 路径
 - 可选的高德 Web JS Key 与 Security JS Code
 - 反向代理或负载均衡器负责 HTTPS 终止；应用容器内部仍监听 8000 端口
 
 AppSecret、FAFU Token 和高德 Security JS Code 以明文保存在 SQLite 中，读取接口只返回掩码。请保护 `/data` 备份和服务器权限。
+
+### 微信错误 10003
+
+`10003` 表示 OAuth 的回调域名与测试号后台配置不一致。系统设置中的“公网 HTTPS 地址”应为 `https://sign.example.com` 这样的完整站点来源，而测试号后台“网页授权获取用户基本信息”的授权回调域名只填写 `sign.example.com`。修改系统设置后重新同步菜单；不要填写协议、端口或回调路径。
 
 ## 启动与首次初始化
 

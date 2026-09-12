@@ -71,6 +71,7 @@ from app.schemas import (
     StatusResponse,
     WorkerActionResponse,
 )
+from app.wechat import normalize_wechat_text
 from app.worker import WorkerManager
 from fafu_auto_sign.logging_config import setup_logging
 from fafu_auto_sign.services.notification_service import NotificationService
@@ -79,6 +80,17 @@ logger = logging.getLogger(__name__)
 worker = WorkerManager()
 manual_sign = ManualSignService(worker)
 DbSession = Annotated[Session, Depends(get_db)]
+
+
+def _repair_user_nicknames(session: Session) -> None:
+    changed = False
+    for user in session.scalars(select(User).where(User.nickname.is_not(None))):
+        repaired = normalize_wechat_text(user.nickname)
+        if repaired != user.nickname:
+            user.nickname = repaired[:64]
+            changed = True
+    if changed:
+        session.commit()
 
 
 def _clear_legacy_business_files(session: Session) -> None:
@@ -99,6 +111,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     run_migrations()
     with SessionLocal() as session:
         _clear_legacy_business_files(session)
+        _repair_user_nicknames(session)
         system = get_or_create_system_settings(session)
         log_level = system.log_level
     setup_logging(log_level, log_dir=str(LOG_DIR))

@@ -1,6 +1,6 @@
-import { Spin } from 'antd';
+import { Button, Result, Spin } from 'antd';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ApiError, api, setCsrfToken } from '../api/client';
+import { ApiError, api, getErrorMessage, setCsrfToken } from '../api/client';
 import type { AuthUser, BootstrapStatus } from '../types/api';
 
 interface AuthState {
@@ -18,9 +18,11 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
   const [loading, setLoading] = useState(true);
   const [bootstrap, setBootstrap] = useState<BootstrapStatus | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [fatalError, setFatalError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setFatalError(null);
     try {
       const status = await api.getBootstrapStatus();
       setBootstrap(status);
@@ -35,6 +37,11 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
           setUser(null);
         }
       }
+    } catch (error) {
+      setBootstrap(null);
+      setUser(null);
+      setCsrfToken(null);
+      setFatalError(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -60,6 +67,18 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
 
   if (loading) {
     return <div className="center-screen"><Spin size="large" /></div>;
+  }
+  if (fatalError) {
+    return (
+      <div className="center-screen">
+        <Result
+          status="error"
+          title="系统状态读取失败"
+          subTitle={fatalError}
+          extra={<Button type="primary" onClick={() => void refresh()}>重试</Button>}
+        />
+      </div>
+    );
   }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -7,8 +7,38 @@ import binascii
 import re
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+def normalize_public_base_url(value: str) -> str:
+    parsed = urlparse(value.strip())
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("公网地址端口无效") from exc
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or port not in {None, 443}
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("公网地址必须是仅包含域名的 HTTPS 地址，例如 https://sign.example.com")
+    return f"https://{parsed.hostname.lower()}"
+
+
+def normalize_menu_name(value: str) -> str:
+    name = value.strip()
+    weighted_length = sum(1 if character.isascii() else 2 for character in name)
+    if not name or weighted_length > 8:
+        raise ValueError("一级菜单名称最多 4 个汉字或 8 个英文字符")
+    return name
+
 
 ImageMode = Literal["single", "library", "latest"]
 RunStatus = Literal["no_task", "success", "partial", "failed", "fatal"]
@@ -132,9 +162,12 @@ class SystemSettingsUpdate(BaseModel):
     @field_validator("public_base_url")
     @classmethod
     def validate_public_url(cls, value: str | None) -> str | None:
-        if value is not None and value and not value.startswith("https://"):
-            raise ValueError("公网地址必须使用 HTTPS")
-        return value.rstrip("/") if value else value
+        return normalize_public_base_url(value) if value else value
+
+    @field_validator("menu_name")
+    @classmethod
+    def validate_menu_name(cls, value: str | None) -> str | None:
+        return normalize_menu_name(value) if value else value
 
 
 class BootstrapSystemRequest(BaseModel):
@@ -159,9 +192,12 @@ class BootstrapSystemRequest(BaseModel):
     @field_validator("public_base_url")
     @classmethod
     def require_https(cls, value: str) -> str:
-        if not value.startswith("https://"):
-            raise ValueError("公网地址必须使用 HTTPS")
-        return value.rstrip("/")
+        return normalize_public_base_url(value)
+
+    @field_validator("menu_name")
+    @classmethod
+    def validate_menu_name(cls, value: str) -> str:
+        return normalize_menu_name(value)
 
     @model_validator(mode="after")
     def validate_amap(self) -> "BootstrapSystemRequest":

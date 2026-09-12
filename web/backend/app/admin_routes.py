@@ -151,6 +151,7 @@ def update_user(
     target = session.get(User, user_id)
     if target is None:
         raise api_error(404, "USER_NOT_FOUND", "用户不存在")
+    previous_status = target.status
     if payload.role == "user" and target.role == "admin":
         ensure_last_admin_safe(session, target, changing_role=True)
     if payload.status in {"disabled", "rejected"}:
@@ -175,7 +176,7 @@ def update_user(
         commit=False,
     )
     session.commit()
-    if target.status == "active":
+    if previous_status != "active" and target.status == "active":
         notify_approval(session, target)
     return admin_user_read(session, target)
 

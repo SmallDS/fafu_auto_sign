@@ -35,10 +35,19 @@ export function AdminSystemPage(): ReactNode {
   const synchronize = () => {
     modal.confirm({
       title: '同步公众号菜单',
-      content: '该操作会覆盖测试号当前的自定义菜单。',
+      content: '将先保存当前表单配置，再覆盖测试号现有自定义菜单。',
+      okText: '保存并同步',
       onOk: async () => {
-        await api.syncMenu();
-        message.success('公众号菜单已同步');
+        try {
+          const values = await form.validateFields();
+          await api.updateAdminSystem(values);
+          form.setFieldsValue({ wechat_app_secret: '', amap_security_js_code: '' });
+          await api.syncMenu();
+          message.success('系统设置已保存，公众号菜单已同步');
+        } catch (error) {
+          message.error(getErrorMessage(error));
+          throw error;
+        }
       },
     });
   };
@@ -54,8 +63,30 @@ export function AdminSystemPage(): ReactNode {
             <Input.Password placeholder="留空保留已保存值" autoComplete="new-password" />
           </Form.Item>
           <Form.Item name="wechat_template_id" label="模板 ID"><Input /></Form.Item>
-          <Form.Item name="public_base_url" label="公网 HTTPS 地址"><Input /></Form.Item>
-          <Form.Item name="menu_name" label="菜单名称"><Input maxLength={32} /></Form.Item>
+          <Form.Item
+            name="public_base_url"
+            label="公网 HTTPS 地址"
+            extra="填写 https://sign.example.com；测试号后台网页授权域名只填写 sign.example.com。"
+            rules={[{ pattern: /^https:\/\/[^/:?#]+\/?$/, message: '请输入不含路径和端口的 HTTPS 域名' }]}
+          >
+            <Input placeholder="https://sign.example.com" />
+          </Form.Item>
+          <Form.Item
+            name="menu_name"
+            label="菜单名称"
+            extra="一级菜单最多 4 个汉字或 8 个英文字符。"
+            rules={[
+              { required: true, message: '请输入菜单名称' },
+              {
+                validator: (_, value: string) => {
+                  const length = Array.from(value ?? '').reduce((total, character) => total + (/^[\x00-\x7F]$/.test(character) ? 1 : 2), 0);
+                  return length <= 8 ? Promise.resolve() : Promise.reject(new Error('一级菜单最多 4 个汉字或 8 个英文字符'));
+                },
+              },
+            ]}
+          >
+            <Input maxLength={8} />
+          </Form.Item>
           <Button onClick={synchronize}>同步公众号菜单</Button>
         </Card>
         <Card title="高德地图" className="section-card">

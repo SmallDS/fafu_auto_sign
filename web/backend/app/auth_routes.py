@@ -37,6 +37,7 @@ from app.wechat import (
     exchange_oauth_code,
     fetch_oauth_profile,
     get_global_access_token,
+    normalize_wechat_text,
 )
 
 router = APIRouter()
@@ -63,7 +64,7 @@ def avatar_url(user: User) -> str | None:
 def auth_user_read(user: User, csrf: str | None = None) -> AuthUserRead:
     return AuthUserRead(
         id=user.id,
-        nickname=user.nickname,
+        nickname=normalize_wechat_text(user.nickname) if user.nickname else None,
         avatar_url=avatar_url(user),
         role=user.role,
         status=user.status,
@@ -126,16 +127,15 @@ def set_pairing_from_user(pairing: LoginPairing | None, user: User) -> None:
         return
     pairing.user_id = user.id
     pairing.scanned_at = utcnow()
-    if user.status == "pending":
+    if user.status in {"pending", "profile_pending"}:
         pairing.expires_at = utcnow() + timedelta(minutes=30)
-    pairing.status = (
-        "ready"
-        if user.status == "active"
-        else "awaiting_approval"
-        if user.status == "pending"
-        else "profile_pending"
-    )
-
+    pairing.status = {
+        "active": "ready",
+        "pending": "awaiting_approval",
+        "profile_pending": "profile_pending",
+        "rejected": "rejected",
+        "disabled": "disabled",
+    }.get(user.status, "expired")
 
 @router.get("/api/bootstrap/status", response_model=BootstrapStatus)
 def bootstrap_status(session: DbSession) -> BootstrapStatus:
@@ -194,7 +194,7 @@ def create_pairing(
     response.set_cookie(
         PAIRING_COOKIE,
         verifier,
-        max_age=ttl_seconds,
+        max_age=1800 if kind == "login" else ttl_seconds,
         httponly=True,
         secure=True,
         samesite="lax",
@@ -224,7 +224,13 @@ def load_pairing_for_browser(
     if pairing is None or not pairing_cookie_ok(request, pairing):
         raise api_error(404, "PAIRING_NOT_FOUND", "登录二维码不存在")
     now = datetime.now(timezone.utc)
-    if as_utc(pairing.expires_at) <= now and pairing.status == "pending":
+    if as_utc(pairing.expires_at) <= now and pairing.status in {
+        "pending",
+        "scanning",
+        "profile_pending",
+        "awaiting_approval",
+        "ready",
+    }:
         pairing.status = "expired"
         session.commit()
     if pairing.status == "awaiting_approval" and pairing.user_id:
@@ -234,6 +240,9 @@ def load_pairing_for_browser(
             session.commit()
         elif user and user.status in {"rejected", "disabled"}:
             pairing.status = user.status
+            session.commit()
+        elif user is None:
+            pairing.status = "expired"
             session.commit()
     return pairing
 
@@ -332,8 +341,9 @@ def wechat_start(
             or as_utc(pairing.expires_at) <= utcnow()
         ):
             raise api_error(410, "PAIRING_EXPIRED", "登录二维码无效或已过期")
-        purpose = "admin_userinfo" if pairing.kind == "admin" else "login_userinfo"
-        scope = "snsapi_userinfo"
+        purpose = "admin_userinfo" if pairing.kind == "admin" else "login_base"
+        scope = "snsapi_userinfo" if pairing.kind == "admin" else "snsapi_base"
+        pairing.status = "scanning"
     elif system.setup_state != "initialized":
         raise api_error(409, "SYSTEM_NOT_INITIALIZED", "系统尚未完成初始化")
     state = create_oauth_state(
@@ -367,12 +377,27 @@ def refresh_wechat_profile(user: CurrentUser, session: DbSession) -> RedirectRes
     )
 
 
+def close_oauth_attempt(session: Session, state_row: OAuthState) -> None:
+    """Consume an OAuth state and stop any browser pairing that cannot finish."""
+    if state_row.consumed_at is None:
+        state_row.consumed_at = utcnow()
+    if state_row.pairing_id:
+        pairing = session.get(LoginPairing, state_row.pairing_id)
+        if pairing and pairing.status in {
+            "pending",
+            "scanning",
+            "profile_pending",
+            "awaiting_approval",
+            "ready",
+        }:
+            pairing.status = "expired"
+    session.commit()
+
+
 @router.get("/auth/wechat/callback")
 def wechat_callback(
     request: Request, session: DbSession, state: str, code: str | None = None
 ) -> RedirectResponse:
-    if not code:
-        return RedirectResponse("/login?error=oauth_denied")
     state_row = session.scalar(
         select(OAuthState).where(OAuthState.state_hash == hash_token(state))
     )
@@ -382,6 +407,9 @@ def wechat_callback(
         or as_utc(state_row.expires_at) <= utcnow()
     ):
         raise api_error(400, "OAUTH_STATE_INVALID", "微信授权状态无效或已经使用")
+    if not code or code == "authdeny":
+        close_oauth_attempt(session, state_row)
+        return RedirectResponse("/login?error=oauth_denied")
     state_row.consumed_at = utcnow()
     session.commit()
 
@@ -389,19 +417,25 @@ def wechat_callback(
     app_id, app_secret, public_base_url = require_oauth_settings(system)
     try:
         token = exchange_oauth_code(app_id, app_secret, code)
-    except WeChatError as exc:
-        raise api_error(502, "WECHAT_OAUTH_FAILED", str(exc)) from exc
+    except WeChatError:
+        close_oauth_attempt(session, state_row)
+        return RedirectResponse("/login?error=wechat_oauth_failed")
     openid = str(token["openid"])
     if state_row.expected_openid and state_row.expected_openid != openid:
+        close_oauth_attempt(session, state_row)
         raise api_error(400, "OPENID_MISMATCH", "两次微信授权身份不一致")
 
     pairing = session.get(LoginPairing, state_row.pairing_id) if state_row.pairing_id else None
     user = session.scalar(select(User).where(User.openid == openid))
-    if state_row.purpose == "regular_base" and user is None:
+    if state_row.purpose in {"regular_base", "login_base"} and user is None:
         raw = create_oauth_state(
             session,
-            purpose="regular_userinfo",
-            pairing_id=None,
+            purpose=(
+                "regular_userinfo"
+                if state_row.purpose == "regular_base"
+                else "login_userinfo"
+            ),
+            pairing_id=state_row.pairing_id,
             expected_openid=openid,
             next_path=state_row.next_path,
         )
@@ -432,7 +466,7 @@ def wechat_callback(
             id=str(uuid.uuid4()),
             openid=openid,
             unionid=str(profile["unionid"]) if profile.get("unionid") else None,
-            nickname=str(profile["nickname"]).strip()[:64] if profile.get("nickname") else None,
+            nickname=normalize_wechat_text(profile["nickname"])[:64] if profile.get("nickname") else None,
             role="admin" if is_admin_setup else "user",
             status="profile_pending",
             profile_authorized_at=utcnow() if profile else None,
@@ -440,10 +474,12 @@ def wechat_callback(
         session.add(user)
         session.flush()
     elif user.status == "disabled":
+        set_pairing_from_user(pairing, user)
+        session.commit()
         return RedirectResponse("/login?error=account_disabled")
 
     if profile.get("nickname"):
-        user.nickname = str(profile["nickname"]).strip()[:64]
+        user.nickname = normalize_wechat_text(profile["nickname"])[:64]
     if profile.get("unionid"):
         user.unionid = str(profile["unionid"])
     if profile.get("headimgurl") and (
@@ -455,12 +491,13 @@ def wechat_callback(
             if user.avatar_storage_name
             else None
         )
-        user.avatar_storage_name = download_wechat_avatar(
+        downloaded_avatar = download_wechat_avatar(
             user.id, str(profile["headimgurl"])
         )
-        if old_avatar and old_avatar.name != user.avatar_storage_name:
-            old_avatar.unlink(missing_ok=True)
-
+        if downloaded_avatar:
+            user.avatar_storage_name = downloaded_avatar
+            if old_avatar and old_avatar.name != downloaded_avatar:
+                old_avatar.unlink(missing_ok=True)
     profile_complete = bool(user.nickname and user.avatar_storage_name)
     if profile_complete:
         if is_admin_setup:
@@ -606,6 +643,15 @@ async def complete_profile(
             pairing.status = "ready"
     elif user.status == "profile_pending":
         user.status = "pending"
+        for pairing in session.scalars(
+            select(LoginPairing).where(
+                LoginPairing.kind == "login",
+                LoginPairing.user_id == user.id,
+                LoginPairing.status == "profile_pending",
+            )
+        ):
+            pairing.status = "awaiting_approval"
+            pairing.expires_at = utcnow() + timedelta(minutes=30)
     session.commit()
     return auth_user_read(user, request.state.auth_session.csrf_token)
 

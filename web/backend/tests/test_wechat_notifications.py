@@ -90,6 +90,7 @@ def test_notification_uses_system_credentials_and_current_openid(
             {"config": self.config, "title": title}
         ) or True,
     )
+    monkeypatch.setattr("app.main.worker.snapshot", lambda user_id: {"state": "idle"})
     app.dependency_overrides[get_db] = lambda: db_session
     app.dependency_overrides[active_user] = lambda: user
     try:
@@ -155,3 +156,111 @@ def test_0006_migration_preserves_system_settings_and_clears_legacy_business_dat
         assert session.execute(select(Settings)).scalars().all() == []
         assert session.execute(select(RunHistory)).scalars().all() == []
     engine.dispose()
+
+def test_wechat_profile_json_is_decoded_as_utf8(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+    import requests
+
+    from app.wechat import fetch_oauth_profile, normalize_wechat_text
+
+    response = requests.Response()
+    response.status_code = 200
+    response.headers["content-type"] = "text/plain"
+    response.encoding = "ISO-8859-1"
+    response._content = json.dumps(
+        {"openid": "openid", "nickname": "中文昵称"}, ensure_ascii=False
+    ).encode("utf-8")
+    monkeypatch.setattr("app.wechat.requests.get", lambda *args, **kwargs: response)
+
+    profile = fetch_oauth_profile("oauth-token", "openid")
+    assert profile["nickname"] == "中文昵称"
+    assert normalize_wechat_text("管理员".encode("utf-8").decode("latin-1")) == "管理员"
+    assert normalize_wechat_text("赵".encode("utf-8").decode("latin-1")) == "赵"
+
+
+def test_public_base_url_rejects_paths_and_nonstandard_ports() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas import BootstrapSystemRequest
+
+    common = {
+        "wechat_app_id": "appid",
+        "wechat_app_secret": "secret",
+        "wechat_template_id": "template",
+    }
+    with pytest.raises(ValidationError):
+        BootstrapSystemRequest(**common, public_base_url="https://example.com/callback")
+    with pytest.raises(ValidationError):
+        BootstrapSystemRequest(**common, public_base_url="https://example.com:8000")
+    valid = BootstrapSystemRequest(**common, public_base_url="https://EXAMPLE.com/")
+    assert valid.public_base_url == "https://example.com"
+
+def test_menu_sync_builds_https_view_button(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+    import requests
+
+    from app.wechat import MENU_CREATE_URL, sync_menu
+
+    response = requests.Response()
+    response.status_code = 200
+    response._content = json.dumps({"errcode": 0, "errmsg": "ok"}).encode("utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("app.wechat.get_global_access_token", lambda *args: "token")
+
+    def post(url: str, **kwargs: object) -> requests.Response:
+        captured.update({"url": url, **kwargs})
+        return response
+
+    monkeypatch.setattr("app.wechat.requests.post", post)
+    sync_menu("appid", "secret", "https://sign.example.com", "签到管理")
+
+    assert captured["url"] == MENU_CREATE_URL
+    assert captured["params"] == {"access_token": "token"}
+    assert captured["json"] == {
+        "button": [
+            {
+                "type": "view",
+                "name": "签到管理",
+                "url": "https://sign.example.com/auth/wechat/start?next=%2Fdashboard",
+            }
+        ]
+    }
+
+
+def test_wechat_error_exposes_safe_error_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+    import requests
+
+    from app.wechat import WeChatError, get_global_access_token
+
+    response = requests.Response()
+    response.status_code = 200
+    response._content = json.dumps(
+        {"errcode": 40164, "errmsg": "sensitive upstream detail"}
+    ).encode("utf-8")
+    monkeypatch.setattr("app.wechat.requests.get", lambda *args, **kwargs: response)
+
+    with pytest.raises(WeChatError, match="40164.*IP 白名单") as caught:
+        get_global_access_token("appid", "secret")
+    assert "sensitive upstream detail" not in str(caught.value)
+
+
+def test_wechat_menu_name_enforces_primary_button_limit() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas import BootstrapSystemRequest, SystemSettingsUpdate
+
+    with pytest.raises(ValidationError, match="最多 4 个汉字"):
+        SystemSettingsUpdate(menu_name="五个汉字名")
+    with pytest.raises(ValidationError, match="最多 4 个汉字"):
+        BootstrapSystemRequest(
+            wechat_app_id="appid",
+            wechat_app_secret="secret",
+            wechat_template_id="template",
+            public_base_url="https://example.com",
+            menu_name="ninechars",
+        )
+    assert SystemSettingsUpdate(menu_name="签到管理").menu_name == "签到管理"

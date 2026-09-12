@@ -309,3 +309,139 @@ def test_admin_detail_resources_are_filtered_by_target_user(db_session: Session)
     assert [item.original_name for item in images.items] == ["first.png"]
     assert [item.summary for item in runs.items] == ["first-run"]
     assert [item.action for item in audits.items] == ["first.action"]
+
+def test_login_pairing_uses_base_scope_one_time_claim_and_long_verifier_cookie(
+    db_session: Session,
+) -> None:
+    configure_system(db_session)
+    response = Response()
+    result = create_pairing(db_session, response, kind="login", ttl_seconds=60)
+    assert "Max-Age=1800" in response.headers["set-cookie"]
+    query = parse_qs(urlparse(result.auth_url or "").query)
+    redirect = wechat_start(
+        session=db_session,
+        pairing_id=result.id,
+        claim=query["claim"][0],
+        next_path="/dashboard",
+    )
+    oauth_query = parse_qs(urlparse(redirect.headers["location"]).query)
+    assert oauth_query["scope"] == ["snsapi_base"]
+    pairing = db_session.get(LoginPairing, result.id)
+    assert pairing is not None and pairing.status == "scanning"
+    with pytest.raises(HTTPException) as replay:
+        wechat_start(
+            session=db_session,
+            pairing_id=result.id,
+            claim=query["claim"][0],
+            next_path="/dashboard",
+        )
+    assert replay.value.status_code == 410
+
+
+def test_completing_profile_advances_desktop_pairing(db_session: Session) -> None:
+    import asyncio
+
+    account = user(db_session, "profile", status="profile_pending")
+    account.avatar_storage_name = "avatar.jpg"
+    pairing = LoginPairing(
+        id=str(uuid.uuid4()),
+        kind="login",
+        claim_hash="a" * 64,
+        verifier_hash="b" * 64,
+        status="profile_pending",
+        user_id=account.id,
+        expires_at=auth_routes.utcnow() + timedelta(minutes=5),
+    )
+    db_session.add(pairing)
+    db_session.commit()
+    callback_request = request()
+    callback_request.state.auth_session = SimpleNamespace(csrf_token="csrf")
+
+    result = asyncio.run(
+        auth_routes.complete_profile(
+            request=callback_request,
+            session=db_session,
+            user=account,
+            nickname="中文用户",
+            avatar=None,
+        )
+    )
+
+    db_session.refresh(pairing)
+    assert result.nickname == "中文用户"
+    assert result.status == "pending"
+    assert pairing.status == "awaiting_approval"
+    assert auth_routes.as_utc(pairing.expires_at) > auth_routes.utcnow() + timedelta(minutes=29)
+
+
+def test_existing_mojibake_nickname_is_repaired(db_session: Session) -> None:
+    from app.main import _repair_user_nicknames
+
+    account = user(db_session, "mojibake")
+    account.nickname = "管理员".encode("utf-8").decode("latin-1")
+    db_session.commit()
+    _repair_user_nicknames(db_session)
+    db_session.refresh(account)
+    assert account.nickname == "管理员"
+
+def test_oauth_denial_consumes_state_and_expires_pairing(db_session: Session) -> None:
+    configure_system(db_session)
+    response = Response()
+    result = create_pairing(db_session, response, kind="login", ttl_seconds=60)
+    pairing_query = parse_qs(urlparse(result.auth_url or "").query)
+    oauth_redirect = wechat_start(
+        session=db_session,
+        pairing_id=result.id,
+        claim=pairing_query["claim"][0],
+        next_path="/dashboard",
+    )
+    raw_state = parse_qs(urlparse(oauth_redirect.headers["location"]).query)["state"][0]
+
+    redirect = wechat_callback(
+        request=request(),
+        session=db_session,
+        state=raw_state,
+        code=None,
+    )
+
+    pairing = db_session.get(LoginPairing, result.id)
+    state_row = db_session.scalar(
+        select(OAuthState).where(OAuthState.state_hash == hash_token(raw_state))
+    )
+    assert redirect.headers["location"] == "/login?error=oauth_denied"
+    assert pairing is not None and pairing.status == "expired"
+    assert state_row is not None and state_row.consumed_at is not None
+
+
+def test_admin_approval_notification_only_runs_on_activation(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import admin_routes
+    from app.schemas import UserAdminUpdate
+
+    administrator = user(db_session, "notification-admin", role="admin")
+    target = user(db_session, "notification-target")
+    notified: list[str] = []
+    monkeypatch.setattr(
+        admin_routes,
+        "notify_approval",
+        lambda session, account: notified.append(account.id),
+    )
+
+    admin_routes.update_user(
+        target.id,
+        UserAdminUpdate(role="user"),
+        administrator,
+        db_session,
+    )
+    assert notified == []
+
+    target.status = "pending"
+    db_session.commit()
+    admin_routes.update_user(
+        target.id,
+        UserAdminUpdate(status="active"),
+        administrator,
+        db_session,
+    )
+    assert notified == [target.id]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import urlencode
 
@@ -13,20 +14,52 @@ OAUTH_USERINFO_URL = "https://api.weixin.qq.com/sns/userinfo"
 GLOBAL_TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/token"
 MENU_CREATE_URL = "https://api.weixin.qq.com/cgi-bin/menu/create"
 TIMEOUT = (5, 10)
+WECHAT_ERROR_MESSAGES = {
+    "10003": "网页授权回调域名与微信后台配置不一致",
+    "40001": "AppSecret 或 access token 无效",
+    "40013": "AppID 无效",
+    "40016": "菜单按钮数量或结构不符合要求",
+    "40018": "菜单名称长度不符合要求",
+    "40125": "AppSecret 无效",
+    "40164": "服务器出口 IP 未加入微信接口 IP 白名单",
+    "42001": "access token 已过期，请重试",
+    "45009": "微信接口调用已达到频率限制",
+    "48001": "当前测试号没有该接口权限",
+}
 
 
 class WeChatError(RuntimeError):
     """Secret-free WeChat integration failure."""
 
 
+def normalize_wechat_text(value: object) -> str:
+    """Normalize profile text and repair common UTF-8-as-Latin-1 mojibake."""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        repaired = text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+    def latin1_noise(candidate: str) -> int:
+        return sum(1 for character in candidate if 0x80 <= ord(character) <= 0xFF)
+
+    return repaired if repaired != text and latin1_noise(repaired) < latin1_noise(text) else text
+
+
 def _json(response: requests.Response, operation: str) -> dict[str, Any]:
     try:
         response.raise_for_status()
-        payload = response.json()
-    except (requests.RequestException, ValueError) as exc:
+        payload = json.loads(response.content.decode("utf-8-sig"))
+    except (requests.RequestException, UnicodeDecodeError, ValueError) as exc:
         raise WeChatError(f"微信{operation}请求失败") from exc
-    if not isinstance(payload, dict) or payload.get("errcode") not in (None, 0):
-        raise WeChatError(f"微信{operation}失败")
+    if not isinstance(payload, dict):
+        raise WeChatError(f"微信{operation}返回了无效数据")
+    error_code = payload.get("errcode")
+    if error_code not in (None, 0, "0"):
+        code = str(error_code)
+        reason = WECHAT_ERROR_MESSAGES.get(code, "微信接口拒绝了请求")
+        raise WeChatError(f"微信{operation}失败（错误码 {code}）：{reason}")
     return payload
 
 
@@ -103,7 +136,10 @@ def sync_menu(
     menu_name: str,
 ) -> None:
     token = get_global_access_token(app_id, app_secret)
-    target = f"{public_base_url.rstrip('/')}/auth/wechat/start?next=/dashboard"
+    target = (
+        f"{public_base_url.rstrip('/')}/auth/wechat/start?"
+        + urlencode({"next": "/dashboard"})
+    )
     try:
         response = requests.post(
             MENU_CREATE_URL,
