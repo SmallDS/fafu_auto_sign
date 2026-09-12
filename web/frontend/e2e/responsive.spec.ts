@@ -37,6 +37,34 @@ async function mockApi(page: Page): Promise<void> {
         jitter: 0.00005,
         service_host: '/_AMapService',
       };
+    } else if (path === '/api/admin/stats') {
+      body = { users: 3, pending: 1, active: 2, queued_jobs: 0 };
+    } else if (path === '/api/admin/users') {
+      body = {
+        items: [{
+          id: 'user-1', openid: 'openid-user-1', unionid: null, nickname: '中文测试用户',
+          avatar_url: null, role: 'user', status: 'active', rejection_reason: null,
+          configured: true, worker_enabled: true, last_login_at: null,
+          created_at: new Date().toISOString(),
+        }],
+        total: 1, page: 1, page_size: 100,
+      };
+    } else if (path === '/api/admin/system') {
+      body = {
+        setup_state: 'initialized', public_base_url: 'https://sign.example.com',
+        menu_name: '签到管理', wechat_app_id: 'wx-app-id', wechat_template_id: 'template-id',
+        wechat_enabled: true, has_wechat_app_secret: true, wechat_app_secret_masked: '***',
+        amap_enabled: false, amap_js_key: null, has_amap_security_js_code: false,
+        amap_security_js_code_masked: null, log_level: 'INFO', menu_synced_at: null,
+      };
+    } else if (path === '/api/admin/audit') {
+      body = { items: [], total: 0, page: 1, page_size: 100 };
+    } else if (path === '/api/auth/sessions') {
+      body = [{
+        id: 'session-1', device_type: 'desktop', user_agent: 'Playwright 浏览器',
+        created_at: new Date().toISOString(), last_seen_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 86_400_000).toISOString(), current: true,
+      }];
     } else if (path === '/api/status') {
       body = {
         configured: true,
@@ -165,4 +193,37 @@ test('移动端任务详情地图无溢出且定位不可用时优雅降级', as
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
+});
+test.describe('管理员页面统一布局', () => {
+  for (const viewport of cases) {
+    test(`${viewport.name} 下管理页面对齐且无溢出`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await mockApi(page);
+
+      for (const [path, heading] of [
+        ['/admin', '管理概览'],
+        ['/admin/users', '用户管理'],
+        ['/admin/system', '系统设置'],
+        ['/admin/audit', '审计日志'],
+        ['/settings', '签到设置'],
+        ['/profile', '个人中心'],
+      ] as const) {
+        await page.goto(path);
+        await expect(page.getByRole('heading', { name: heading })).toBeVisible();
+        const container = page.locator('.page-container');
+        await expect(container).toHaveCount(1);
+        const layout = await container.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            paddingLeft: Number.parseFloat(style.paddingLeft),
+            paddingRight: Number.parseFloat(style.paddingRight),
+            overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          };
+        });
+        expect(layout.paddingLeft).toBeGreaterThanOrEqual(10);
+        expect(layout.paddingRight).toBeGreaterThanOrEqual(10);
+        expect(layout.overflow).toBeLessThanOrEqual(1);
+      }
+    });
+  }
 });

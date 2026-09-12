@@ -1,8 +1,8 @@
 import { App, Avatar, Button, Card, List, Space, Typography } from 'antd';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
-import { useAuth } from '../context/AuthContext';
 import { PageHeading } from '../components/PageHeading';
+import { useAuth } from '../context/AuthContext';
 import type { UserSession } from '../types/api';
 
 export function ProfilePage(): ReactNode {
@@ -28,29 +28,36 @@ export function ProfilePage(): ReactNode {
   };
 
   const logout = async () => {
-    await api.logout();
-    clearUser();
-    window.location.assign('/login');
+    try {
+      await api.logout();
+      clearUser();
+      window.location.assign('/login');
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
   };
 
   return (
-    <>
+    <div className="page-container narrow-page">
       <PageHeading title="个人中心" description="查看微信身份与已登录设备。" />
-      <Card className="section-card">
-        <Space>
-          <Avatar size={56} src={user?.avatar_url}>{user?.nickname?.slice(0, 1)}</Avatar>
-          <div>
-            <Typography.Title level={4}>{user?.nickname}</Typography.Title>
-            <Typography.Text type="secondary">{user?.role === 'admin' ? '管理员' : '用户'}</Typography.Text>
-          </div>
-          <Button onClick={() => window.location.assign('/auth/wechat/refresh')}>在微信内刷新昵称头像</Button>
-        </Space>
+      <Card className="content-card section-card">
+        <div className="profile-summary">
+          <Space className="profile-identity">
+            <Avatar size={56} src={user?.avatar_url}>{user?.nickname?.slice(0, 1)}</Avatar>
+            <div className="profile-copy">
+              <Typography.Title level={4}>{user?.nickname || '未填写昵称'}</Typography.Title>
+              <Typography.Text type="secondary">{user?.role === 'admin' ? '管理员' : '用户'}</Typography.Text>
+            </div>
+          </Space>
+          <Button className="profile-refresh" onClick={() => window.location.assign('/auth/wechat/refresh')}>在微信内刷新昵称头像</Button>
+        </div>
       </Card>
-      <Card title="登录设备" className="section-card">
+      <Card title="登录设备" className="content-card section-card">
         <List
           dataSource={sessions}
+          locale={{ emptyText: '没有有效设备' }}
           renderItem={(item) => (
-            <List.Item actions={[<Button danger onClick={() => void revoke(item.id)}>撤销</Button>]}>
+            <List.Item className="session-list-item" actions={[<Button danger onClick={() => void revoke(item.id)}>撤销</Button>]}>
               <List.Item.Meta
                 title={(item.device_type === 'mobile' ? '手机' : '电脑') + (item.current ? '（当前）' : '')}
                 description={item.user_agent || '未知设备'}
@@ -59,7 +66,7 @@ export function ProfilePage(): ReactNode {
           )}
         />
       </Card>
-      <Button danger onClick={() => void logout()}>退出登录</Button>
-    </>
+      <Button danger className="mobile-full-button" onClick={() => void logout()}>退出登录</Button>
+    </div>
   );
 }

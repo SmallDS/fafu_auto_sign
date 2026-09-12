@@ -42,6 +42,20 @@ describe('AdminSystemPage', () => {
     mockedApi.syncMenu.mockResolvedValue({ state: 'idle', message: 'ok' });
   });
 
+  it('菜单接口失败时在页面持续显示具体错误', async () => {
+    mockedApi.syncMenu.mockRejectedValue(new Error('微信菜单同步失败（错误码 48001）'));
+    render(
+      <ConfigProvider><AntApp><AdminSystemPage /></AntApp></ConfigProvider>,
+    );
+
+    const synchronize = await screen.findByRole('button', { name: '同步公众号菜单' });
+    await waitFor(() => expect(synchronize).toBeEnabled());
+    fireEvent.click(synchronize);
+    fireEvent.click(await screen.findByRole('button', { name: '保存并同步' }));
+
+    expect(await screen.findByText('公众号菜单同步失败')).toBeInTheDocument();
+    expect((await screen.findAllByText('微信菜单同步失败（错误码 48001）')).length).toBeGreaterThanOrEqual(1);
+  });
   it('同步菜单前先保存当前表单配置', async () => {
     render(
       <ConfigProvider><AntApp><AdminSystemPage /></AntApp></ConfigProvider>,

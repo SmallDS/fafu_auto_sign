@@ -264,3 +264,76 @@ def test_wechat_menu_name_enforces_primary_button_limit() -> None:
             menu_name="ninechars",
         )
     assert SystemSettingsUpdate(menu_name="签到管理").menu_name == "签到管理"
+
+def configured_menu_admin(db_session: Session) -> User:
+    administrator = User(
+        id=str(uuid.uuid4()),
+        openid="menu-admin-openid",
+        nickname="菜单管理员",
+        role="admin",
+        status="active",
+    )
+    db_session.add(administrator)
+    system = get_or_create_system_settings(db_session)
+    system.setup_state = "initialized"
+    system.public_base_url = "https://sign.example.com"
+    system.menu_name = "签到管理"
+    system.wechat_app_id = "wx-app-id"
+    system.wechat_app_secret = "secret"
+    system.wechat_template_id = "template"
+    system.wechat_enabled = True
+    db_session.commit()
+    return administrator
+
+
+def test_menu_sync_converts_unexpected_failure_to_structured_502(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi import HTTPException
+
+    from app import admin_routes
+
+    administrator = configured_menu_admin(db_session)
+    monkeypatch.setattr(
+        admin_routes,
+        "sync_menu",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("unexpected")),
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        admin_routes.synchronize_menu(administrator, db_session)
+
+    assert caught.value.status_code == 502
+    assert caught.value.detail == {
+        "code": "WECHAT_MENU_FAILED",
+        "message": "公众号菜单同步失败，请查看服务日志后重试",
+    }
+
+
+def test_menu_sync_audit_failure_does_not_mask_wechat_error(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi import HTTPException
+
+    from app import admin_routes
+
+    administrator = configured_menu_admin(db_session)
+    monkeypatch.setattr(
+        admin_routes,
+        "sync_menu",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            admin_routes.WeChatError("微信菜单同步失败（错误码 48001）：当前测试号没有该接口权限")
+        ),
+    )
+    monkeypatch.setattr(
+        admin_routes,
+        "audit",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("audit failed")),
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        admin_routes.synchronize_menu(administrator, db_session)
+
+    assert caught.value.status_code == 502
+    assert caught.value.detail["code"] == "WECHAT_MENU_FAILED"
+    assert "48001" in caught.value.detail["message"]

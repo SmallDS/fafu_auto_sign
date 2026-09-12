@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 from datetime import datetime, timezone
 from typing import Annotated
@@ -9,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth import AdminUser
@@ -53,6 +55,7 @@ from fafu_auto_sign.services.wechat_test_account_service import (
 
 router = APIRouter(prefix="/api/admin")
 DbSession = Annotated[Session, Depends(get_db)]
+logger = logging.getLogger(__name__)
 
 
 def ensure_last_admin_safe(
@@ -447,6 +450,21 @@ def reveal_system_secret(
     }
 
 
+def record_menu_failure(session: Session, admin_id: str, detail: str) -> None:
+    """Best-effort audit that must not replace the original WeChat error."""
+    try:
+        audit(
+            session,
+            admin_id,
+            "system.menu.sync",
+            result="failed",
+            detail=detail,
+        )
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to persist menu synchronization audit")
+
+
 @router.post("/system/menu/sync", response_model=WorkerActionResponse)
 def synchronize_menu(
     admin: AdminUser, session: DbSession
@@ -467,11 +485,29 @@ def synchronize_menu(
             row.menu_name,
         )
     except WeChatError as exc:
-        audit(session, admin.id, "system.menu.sync", result="failed", detail=str(exc))
+        record_menu_failure(session, admin.id, str(exc))
         raise api_error(502, "WECHAT_MENU_FAILED", str(exc)) from exc
-    row.menu_synced_at = utcnow()
-    audit(session, admin.id, "system.menu.sync", commit=False)
-    session.commit()
+    except Exception as exc:
+        logger.exception("Unexpected WeChat menu synchronization failure")
+        record_menu_failure(session, admin.id, "公众号菜单同步发生未知异常")
+        raise api_error(
+            502,
+            "WECHAT_MENU_FAILED",
+            "公众号菜单同步失败，请查看服务日志后重试",
+        ) from exc
+
+    try:
+        row.menu_synced_at = utcnow()
+        audit(session, admin.id, "system.menu.sync", commit=False)
+        session.commit()
+    except SQLAlchemyError as exc:
+        session.rollback()
+        logger.exception("Menu was submitted but local synchronization state could not be saved")
+        raise api_error(
+            503,
+            "MENU_STATE_SAVE_FAILED",
+            "菜单已提交给微信，但本地同步状态保存失败，请刷新后确认",
+        ) from exc
     return WorkerActionResponse(state="idle", message="公众号菜单已同步")
 
 

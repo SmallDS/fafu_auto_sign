@@ -87,6 +87,7 @@ export function AppShell({ children }: { children: ReactNode }): ReactNode {
         <Content className="app-content">{children}</Content>
       </Layout>
       <Drawer
+        className="navigation-drawer"
         placement="left"
         width="min(82vw, 300px)"
         open={mobile && drawerOpen}

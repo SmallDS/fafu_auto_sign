@@ -665,6 +665,14 @@ select {
   text-align: center;
 }
 
+.auth-card.qr-stage > .ant-card-body {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  flex-direction: column;
+  gap: 18px;
+}
+
 .section-card {
   margin-bottom: 16px;
 }
@@ -703,6 +711,14 @@ select {
     margin-top: 16px;
   }
 
+  .auth-card > .ant-card-body {
+    padding: 20px 16px;
+  }
+
+  .auth-card .ant-result {
+    padding-inline: 0;
+  }
+
   .section-card .ant-card-body {
     padding: 16px;
   }
@@ -711,4 +727,108 @@ select {
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
+}
+.app-sider .ant-layout-sider-children,
+.navigation-drawer .ant-drawer-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.nav-user .ant-typography {
+  min-width: 0;
+}
+
+.admin-queue-card {
+  margin-top: 16px;
+}
+
+.admin-queue-card .ant-typography {
+  margin: 0;
+}
+
+.profile-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.profile-identity,
+.profile-copy {
+  min-width: 0;
+}
+
+.profile-copy h4.ant-typography {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.page-container .ant-table-wrapper,
+.page-container .ant-list,
+.page-container .ant-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin-user-mobile-item,
+.audit-mobile-item,
+.session-list-item {
+  min-width: 0;
+}
+
+.admin-user-mobile-item .ant-list-item-meta,
+.audit-mobile-item .ant-list-item-meta,
+.session-list-item .ant-list-item-meta {
+  min-width: 0;
+}
+
+.admin-user-mobile-item .ant-list-item-meta-description,
+.audit-mobile-item .ant-list-item-meta-description,
+.session-list-item .ant-list-item-meta-description,
+.ant-drawer .ant-descriptions-item-content {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .profile-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .profile-refresh,
+  .mobile-full-button,
+  .admin-user-filter {
+    width: 100% !important;
+  }
+
+  .admin-user-mobile-item,
+  .audit-mobile-item,
+  .session-list-item {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .admin-user-mobile-item .ant-list-item-action,
+  .session-list-item .ant-list-item-action {
+    margin-inline-start: 8px;
+  }
+
+  .sticky-save-bar .ant-btn {
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 390px) {
+  .sticky-save-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sticky-save-bar .ant-btn,
+  .sticky-save-bar .ant-space,
+  .sticky-save-bar .ant-space-item {
+    width: 100%;
+  }
 }

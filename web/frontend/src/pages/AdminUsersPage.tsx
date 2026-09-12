@@ -17,6 +17,7 @@ export function AdminUsersPage(): ReactNode {
   const { message } = App.useApp();
   const mobile = !Grid.useBreakpoint().md;
   const [items, setItems] = useState<AdminUser[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [sessions, setSessions] = useState<UserSession[]>([]);
@@ -29,12 +30,15 @@ export function AdminUsersPage(): ReactNode {
   const [filter, setFilter] = useState<UserStatus | undefined>();
 
   const load = async () => {
+    setLoading(true);
     try {
       const page = await api.listAdminUsers(1, 100, filter);
       setItems(page.items);
       if (selected) setSelected(page.items.find((item) => item.id === selected.id) ?? null);
     } catch (error) {
       message.error(getErrorMessage(error));
+    } finally {
+      setLoading(false);
     }
   };
   useEffect(() => { void load(); }, [filter]);
@@ -120,46 +124,51 @@ export function AdminUsersPage(): ReactNode {
 
   const action = (user: AdminUser) => <Button onClick={() => void open(user)}>管理</Button>;
   return (
-    <>
+    <div className="page-container">
       <PageHeading title="用户管理" description="审核用户，管理角色、完整签到配置、设备与运行记录。" />
-      <Select
-        allowClear
-        placeholder="筛选状态"
-        style={{ width: 180, marginBottom: 16 }}
-        value={filter}
-        onChange={setFilter}
-        options={Object.entries(statusLabels).map(([value, label]) => ({ value, label }))}
-      />
-      {mobile ? (
-        <List
-          dataSource={items}
-          renderItem={(user) => (
-            <Card className="mobile-list-card">
-              <List.Item actions={[action(user)]}>
+      <Card className="content-card">
+        <Select
+          allowClear
+          placeholder="筛选状态"
+          className="admin-user-filter"
+          style={{ width: 180, marginBottom: 16 }}
+          value={filter}
+          onChange={setFilter}
+          options={Object.entries(statusLabels).map(([value, label]) => ({ value, label }))}
+        />
+        {mobile ? (
+          <List
+            loading={loading}
+            dataSource={items}
+            locale={{ emptyText: '暂无用户' }}
+            renderItem={(user) => (
+              <List.Item className="admin-user-mobile-item" actions={[action(user)]}>
                 <List.Item.Meta
                   avatar={<Avatar src={user.avatar_url}>{user.nickname?.slice(0, 1)}</Avatar>}
                   title={user.nickname || '未填写昵称'}
                   description={<Space wrap><Tag>{statusLabels[user.status]}</Tag><Tag>{user.role}</Tag></Space>}
                 />
               </List.Item>
-            </Card>
-          )}
-        />
-      ) : (
-        <Table
-          rowKey="id"
-          dataSource={items}
-          pagination={{ pageSize: 20 }}
-          columns={[
-            { title: '用户', render: (_, user) => <Space><Avatar src={user.avatar_url} />{user.nickname}</Space> },
-            { title: 'OpenID', dataIndex: 'openid', ellipsis: true },
-            { title: '角色', dataIndex: 'role' },
-            { title: '状态', render: (_, user) => <Tag>{statusLabels[user.status]}</Tag> },
-            { title: '配置', render: (_, user) => user.configured ? '完整' : '未完成' },
-            { title: '操作', render: (_, user) => action(user) },
-          ]}
-        />
-      )}
+            )}
+          />
+        ) : (
+          <Table
+            rowKey="id"
+            loading={loading}
+            dataSource={items}
+            scroll={{ x: 900 }}
+            pagination={{ pageSize: 20 }}
+            columns={[
+              { title: '用户', render: (_, user) => <Space><Avatar src={user.avatar_url} />{user.nickname}</Space> },
+              { title: 'OpenID', dataIndex: 'openid', ellipsis: true },
+              { title: '角色', dataIndex: 'role' },
+              { title: '状态', render: (_, user) => <Tag>{statusLabels[user.status]}</Tag> },
+              { title: '配置', render: (_, user) => user.configured ? '完整' : '未完成' },
+              { title: '操作', render: (_, user) => action(user) },
+            ]}
+          />
+        )}
+      </Card>
       <Drawer
         title={selected?.nickname || '用户详情'}
         width={mobile ? '100%' : 680}
@@ -167,7 +176,7 @@ export function AdminUsersPage(): ReactNode {
         onClose={() => setSelected(null)}
       >
         {selected ? (
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <Descriptions column={1} bordered size="small">
               <Descriptions.Item label="OpenID">{selected.openid}</Descriptions.Item>
               <Descriptions.Item label="状态">{statusLabels[selected.status]}</Descriptions.Item>
@@ -188,7 +197,7 @@ export function AdminUsersPage(): ReactNode {
 
             <Card size="small" title="签到配置">
               {settings ? (
-                <Space direction="vertical" style={{ width: '100%' }}>
+                <Space orientation="vertical" style={{ width: '100%' }}>
                   <Space.Compact block>
                     <Input.Password value={token} onChange={(event) => setToken(event.target.value)} placeholder={settings.user_token_masked || '输入新 Token'} />
                     <Button onClick={() => void reveal()}>显示</Button>
@@ -248,6 +257,6 @@ export function AdminUsersPage(): ReactNode {
           </Space>
         ) : null}
       </Drawer>
-    </>
+    </div>
   );
 }

@@ -1,4 +1,4 @@
-import { App, Button, Card, Form, Input, InputNumber, Radio, Space, Switch } from 'antd';
+import { App, Button, Card, Col, Form, Input, InputNumber, Radio, Row, Switch, Typography } from 'antd';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { PageHeading } from '../components/PageHeading';
@@ -22,6 +22,7 @@ export function SettingsPage(): ReactNode {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -61,6 +62,7 @@ export function SettingsPage(): ReactNode {
       clear_user_token: values.clear_user_token,
     };
     if (values.user_token?.trim()) payload.user_token = values.user_token.trim();
+    setSaving(true);
     try {
       const saved = await api.updateSettings(payload);
       setSettings(saved);
@@ -68,6 +70,8 @@ export function SettingsPage(): ReactNode {
       message.success('设置已保存');
     } catch (error) {
       message.error(getErrorMessage(error));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -76,39 +80,52 @@ export function SettingsPage(): ReactNode {
     : 'Token';
 
   return (
-    <>
+    <div className="page-container narrow-page">
       <PageHeading title="签到设置" description="每位用户拥有独立的 FAFU 配置、图片和运行计划。" />
       <Form form={form} layout="vertical" onFinish={save} disabled={loading}>
-        <Card title="FAFU 账号" className="section-card">
+        <Card title="FAFU 账号" className="content-card section-card">
           <Form.Item label={tokenLabel} name="user_token">
             <Input.Password placeholder="以 2_ 开头，或粘贴完整 Base64 Authorization" autoComplete="new-password" />
           </Form.Item>
-          <Form.Item name="clear_user_token" valuePropName="checked">
-            <Switch /> <span className="switch-label">清除已保存 Token</span>
+          <Form.Item name="clear_user_token" label="清除已保存 Token" valuePropName="checked">
+            <Switch checkedChildren="清除" unCheckedChildren="保留" />
           </Form.Item>
         </Card>
-        <Card title="签到规则" className="section-card">
+        <Card title="签到规则" className="content-card section-card">
           <Form.Item name="task_keywords_text" label="任务关键词">
             <Input.TextArea rows={4} placeholder="每行一个；留空表示不过滤关键词" />
           </Form.Item>
-          <Space wrap size="large">
-            <Form.Item name="jitter" label="GPS 随机偏移">
-              <InputNumber min={0} max={0.001} step={0.00001} />
-            </Form.Item>
-            <Form.Item name="heartbeat_interval" label="检查间隔（秒）">
-              <InputNumber min={10} max={86400} />
-            </Form.Item>
-          </Space>
-          <Form.Item name="worker_enabled" label="自动检查" valuePropName="checked"><Switch /></Form.Item>
-          <Form.Item name="notification_enabled" label="微信结果通知" valuePropName="checked"><Switch /></Form.Item>
+          <Row gutter={[16, 0]}>
+            <Col xs={24} sm={12}>
+              <Form.Item name="jitter" label="GPS 随机偏移">
+                <InputNumber className="full-width" min={0} max={0.001} step={0.00001} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item name="heartbeat_interval" label="检查间隔（秒）">
+                <InputNumber className="full-width" min={10} max={86400} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={[16, 0]}>
+            <Col xs={24} sm={12}>
+              <Form.Item name="worker_enabled" label="自动检查" valuePropName="checked"><Switch /></Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item name="notification_enabled" label="微信结果通知" valuePropName="checked"><Switch /></Form.Item>
+            </Col>
+          </Row>
         </Card>
-        <Card title="签到图片" className="section-card">
+        <Card title="签到图片" className="content-card section-card">
           <Form.Item name="image_mode" label="图片策略">
             <Radio.Group
+              className="responsive-radio-group"
+              optionType="button"
+              buttonStyle="solid"
               options={[
                 { value: 'single', label: '固定单图' },
                 { value: 'library', label: '图库随机' },
-                { value: 'latest', label: '最新图片队列' },
+                { value: 'latest', label: '最新队列' },
               ]}
             />
           </Form.Item>
@@ -124,8 +141,11 @@ export function SettingsPage(): ReactNode {
             ) : null}
           </Form.Item>
         </Card>
-        <Button type="primary" htmlType="submit" size="large">保存设置</Button>
+        <div className="sticky-save-bar">
+          <Typography.Text type="secondary">保存后后台任务会自动加载新配置</Typography.Text>
+          <Button type="primary" htmlType="submit" size="large" loading={saving}>保存设置</Button>
+        </div>
       </Form>
-    </>
+    </div>
   );
 }
