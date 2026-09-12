@@ -166,10 +166,13 @@ def update_system_settings(
 
     for name in (
         "public_base_url", "menu_name", "wechat_app_id", "wechat_template_id",
-        "wechat_enabled", "amap_enabled", "amap_js_key", "log_level",
+        "amap_js_key", "log_level",
     ):
         if name in fields_set and values.get(name) is not None:
             setattr(settings, name, values[name] or None)
+    for name in ("wechat_enabled", "amap_enabled"):
+        if name in fields_set and values.get(name) is not None:
+            setattr(settings, name, values[name])
 
     if settings.wechat_enabled and not all(
         (settings.wechat_app_id, settings.wechat_app_secret, settings.wechat_template_id)

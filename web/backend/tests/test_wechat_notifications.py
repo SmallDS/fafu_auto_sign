@@ -60,6 +60,35 @@ def test_system_wechat_secret_mask_preserve_clear_and_validate(db_session: Sessi
         )
 
 
+def test_system_settings_persist_explicit_false_flags(db_session: Session) -> None:
+    system = get_or_create_system_settings(db_session)
+    system.public_base_url = "https://example.com"
+    system.wechat_app_id = "wx-app-id"
+    system.wechat_app_secret = "secret"
+    system.wechat_template_id = "template"
+    system.wechat_enabled = True
+    system.amap_js_key = "amap-key"
+    system.amap_security_js_code = "amap-secret"
+    system.amap_enabled = True
+    db_session.commit()
+
+    updated = update_system_settings(
+        db_session,
+        SystemSettingsUpdate(
+            wechat_enabled=False,
+            amap_enabled=False,
+        ),
+    )
+
+    assert updated.wechat_enabled is False
+    assert updated.amap_enabled is False
+    db_session.expire_all()
+    persisted = db_session.get(SystemSettings, 1)
+    assert persisted is not None
+    assert persisted.wechat_enabled is False
+    assert persisted.amap_enabled is False
+
+
 def test_notification_uses_system_credentials_and_current_openid(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
