@@ -5,6 +5,7 @@ import type { RunResult, WorkerState } from '../types/api';
 const workerLabels: Record<WorkerState, string> = {
   unconfigured: '待配置',
   idle: '运行中',
+  queued: '排队中',
   executing: '正在检查',
   paused: '已暂停',
   error: '异常',

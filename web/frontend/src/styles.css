@@ -635,3 +635,80 @@ select {
     flex-direction: column;
   }
 }
+
+.center-screen,
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.auth-page {
+  padding: 24px;
+  background: linear-gradient(145deg, #ecfdf5, #f8fafc 52%, #eff6ff);
+}
+
+.auth-card {
+  width: min(100%, 640px);
+  box-shadow: 0 18px 60px rgb(15 23 42 / 10%);
+}
+
+.setup-form {
+  margin-top: 28px;
+}
+
+.qr-stage {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 18px;
+  text-align: center;
+}
+
+.section-card {
+  margin-bottom: 16px;
+}
+
+.nav-user {
+  margin: auto 16px 20px;
+  padding: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.mobile-list-card {
+  margin-bottom: 12px;
+}
+
+.image-radio-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.switch-label {
+  margin-left: 8px;
+}
+
+@media (max-width: 767px) {
+  .auth-page {
+    padding: 12px;
+    align-items: start;
+  }
+
+  .auth-card {
+    margin-top: 16px;
+  }
+
+  .section-card .ant-card-body {
+    padding: 16px;
+  }
+}
+.admin-user-image {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}

@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir . -r web/backend/requirements.txt \
 COPY web/backend/ ./web/backend/
 COPY --from=frontend-builder /build/dist/ ./web/frontend/dist/
 COPY web/docker-entrypoint.sh /usr/local/bin/docker-entrypoint
-RUN mkdir -p /data/images/library /data/images/latest /data/logs \
+RUN mkdir -p /data/users /data/logs \
     && chown -R fafu:fafu /app /data \
     && sed -i 's/\r$//' /usr/local/bin/docker-entrypoint \
     && chmod 0755 /usr/local/bin/docker-entrypoint

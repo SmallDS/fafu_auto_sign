@@ -7,29 +7,28 @@ const settings = {
   user_token_masked: '2_t********oken',
   jitter: 0.00005,
   heartbeat_interval: 900,
-  log_level: 'INFO',
-  amap_enabled: false,
-  amap_js_key: null,
-  has_amap_security_js_code: false,
-  amap_security_js_code_masked: null,
-  wechat_test_enabled: false,
-  wechat_test_app_id: null,
-  wechat_test_template_id: null,
-  has_wechat_test_app_secret: false,
-  wechat_test_app_secret_masked: null,
-  has_wechat_test_openid: false,
-  wechat_test_openid_masked: null,
   task_keywords: ['晚归'],
   image_mode: 'library',
   selected_image_id: null,
   worker_enabled: true,
+  notification_enabled: true,
 };
 
 async function mockApi(page: Page): Promise<void> {
   await page.route(/^https?:\/\/[^/]+\/api(?:\/|$)/, async (route) => {
     const path = new URL(route.request().url()).pathname;
     let body: unknown;
-    if (path === '/api/settings') {
+    if (path === '/api/bootstrap/status') {
+      body = {
+        setup_state: 'initialized', initialized: true, system_configured: true,
+        admin_binding: false, requires_system_configuration: false,
+      };
+    } else if (path === '/api/auth/me') {
+      body = {
+        id: 'admin-1', nickname: '管理员', avatar_url: null, role: 'admin',
+        status: 'active', rejection_reason: null, csrf_token: 'csrf',
+      };
+    } else if (path === '/api/settings') {
       body = settings;
     } else if (path === '/api/map/config') {
       body = {
@@ -92,7 +91,7 @@ for (const viewport of cases) {
 
     for (const [path, heading] of [
       ['/dashboard', '运行概览'],
-      ['/settings', '系统设置'],
+      ['/settings', '签到设置'],
       ['/sign-tasks', '签到任务'],
       ['/images', '图片管理'],
       ['/history', '运行历史'],

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import app.manual_sign as manual_module
+from app.auth import active_user
 from app.database import get_db
 from app.main import app, manual_sign
 from app.manual_sign import (
@@ -158,12 +159,13 @@ def test_sign_task_list_api_returns_nullable_total(db_session: Session, monkeypa
         total=None,
         has_more=False,
     )
-    monkeypatch.setattr(manual_sign, "list_tasks", lambda _session, _page, _page_size: task_page)
+    monkeypatch.setattr(manual_sign, "list_tasks", lambda _session, _page, _page_size, **_kwargs: task_page)
 
     def override_db():
         yield db_session
 
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[active_user] = lambda: SimpleNamespace(id="test-user")
     try:
         client = TestClient(app)
         response = client.get("/api/sign-tasks?page=1&page_size=20")
@@ -198,15 +200,16 @@ def test_sign_task_detail_submit_and_busy_api_mapping(db_session: Session, monke
     monkeypatch.setattr(
         manual_sign,
         "get_details",
-        lambda _session, task_id: TaskDetails(task_id, 456, 118.1, 25.1, "宿舍楼"),
+        lambda _session, task_id, **_kwargs: TaskDetails(task_id, 456, 118.1, 25.1, "宿舍楼"),
     )
-    submit = lambda _session, task_id, source_page, page_size: run
+    submit = lambda _session, task_id, source_page, page_size, **_kwargs: run
     monkeypatch.setattr(manual_sign, "submit", submit)
 
     def override_db():
         yield db_session
 
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[active_user] = lambda: SimpleNamespace(id="test-user")
     try:
         client = TestClient(app)
         details = client.get("/api/sign-tasks/123")
@@ -450,6 +453,7 @@ def test_api_maps_detail_upstream_and_inactive_run_id(db_session: Session, monke
         yield db_session
 
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[active_user] = lambda: SimpleNamespace(id="test-user")
     try:
         client = TestClient(app)
         monkeypatch.setattr(

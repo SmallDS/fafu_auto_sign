@@ -6,9 +6,13 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.database import Base
+from app.paths import DATABASE_PATH, ensure_data_directories
 from app import models  # noqa: F401
 
 config = context.config
+if config.get_main_option("sqlalchemy.url") == "sqlite:////data/app.db":
+    ensure_data_directories()
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{DATABASE_PATH.as_posix()}")
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 target_metadata = Base.metadata

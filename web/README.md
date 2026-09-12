@@ -1,10 +1,20 @@
-# FAFU Auto Sign Web 管理台
+# FAFU Auto Sign Web 多用户管理台
 
-这是现有自动签到程序的单账号 Web 管理界面。FastAPI、后台调度器和 Ant Design 前端运行在同一个容器中；SQLite、图片和日志统一保存在 `web/data`，重建或重启容器不会丢失。
+FastAPI、全局签到队列和 Ant Design 前端运行在同一个容器中。系统使用微信公众号接口测试号 OpenID 识别用户，支持首次管理员扫码绑定、普通用户注册审核、电脑扫码登录、独立签到配置/图片/历史和按 OpenID 模板通知。
 
-> 安全提示：管理台没有登录鉴权，Token、测试号 AppSecret、OpenID 和高德 Security JS Code 以明文保存在 SQLite 中。只能部署在可信局域网，不要直接暴露到公网，也不要提交 `web/data`。
+## 部署前准备
 
-## 启动
+需要准备：
+
+- 微信公众号接口测试号 AppID、AppSecret 和模板 ID
+- 已备案并能访问本服务的公网 HTTPS 地址
+- 把 `{公网地址}/auth/wechat/callback` 配置为网页授权回调域名
+- 可选的高德 Web JS Key 与 Security JS Code
+- 反向代理或负载均衡器负责 HTTPS 终止；应用容器内部仍监听 8000 端口
+
+AppSecret、FAFU Token 和高德 Security JS Code 以明文保存在 SQLite 中，读取接口只返回掩码。请保护 `/data` 备份和服务器权限。
+
+## 启动与首次初始化
 
 在项目根目录执行：
 
@@ -12,72 +22,83 @@
 docker compose -f web/docker-compose.yml up -d --build
 ```
 
-打开 <http://localhost:8000>，先上传签到图片，再进入设置页填写 Token 和图片策略。
+通过公网 HTTPS 地址打开管理台。首次初始化分为两步：
 
-设置页的“用户 Token / Authorization”支持两种输入：直接填写以 2_ 开头的 USER_TOKEN，或粘贴数字 FAFU 请求头中的完整 Base64 Authorization。完整值会由后端严格校验并仅提取、保存末段 USER_TOKEN；原始 Authorization 不会持久化或出现在错误响应中。
+1. 填写并验证测试号、模板、公网地址、菜单名称及可选高德配置。
+2. 管理员用微信扫描 5 分钟有效的绑定二维码，通过 `snsapi_userinfo` 获取昵称头像；资料缺失时在手机页面补充。
 
-服务仅启动一个 Uvicorn worker，禁止增加副本或水平扩容，否则可能重复签到。
+管理员绑定成功后初始化接口永久关闭，电脑自动换取独立管理员 Session 并进入 `/admin`。初始化没有额外口令，因此全新部署后应立即完成初始化。
 
-查看状态与日志：
+## 用户与登录流程
 
-```powershell
-docker compose -f web/docker-compose.yml ps
-docker compose -f web/docker-compose.yml logs -f
-```
+- 公众号菜单指向 `/auth/wechat/start?next=/dashboard`。
+- 新用户先经 `snsapi_base` 获取 OpenID，再经 `snsapi_userinfo` 获取昵称头像；资料完成后进入待审核状态。
+- 管理员批准后，待审核页面通过 SSE 实时更新并进入 FAFU 首次配置。
+- 电脑 `/login` 二维码未扫码 60 秒失效；扫码后活跃用户直接登录，待审核配对最多保留 30 分钟。
+- Session 有效期 30 天并滑动续期，每位用户最多保留 10 个有效设备，可在个人中心撤销。
+- Cookie 使用 HttpOnly、Secure、SameSite=Lax；写请求同时校验 CSRF Token。
 
-停止服务：
+电脑二维码采用“扫码即登录”，不会在手机端二次确认。请只扫描自己主动打开的登录二维码，并通过个人中心检查和撤销陌生设备。
+
+## 管理员功能
+
+管理员导航提供：
+
+- 用户审核、驳回、禁用、恢复、管理员角色调整
+- 查看 OpenID、配置完整度、完整 FAFU Token（主动显示会写审计）
+- 修改用户配置、撤销设备、立即执行指定用户签到
+- 彻底删除用户数据库记录与 `/data/users/{user_id}` 文件
+- 修改系统测试号、模板、公网地址、高德和日志设置
+- 确认后覆盖并同步公众号自定义菜单
+- 查看系统日志和管理员敏感操作审计
+
+系统阻止删除、禁用或降级最后一个有效管理员。
+
+## 多用户调度与数据目录
+
+所有用户共享一个 SQLite 持久任务队列和一个 `SignExecutor` 执行线程：
+
+- 仅调度 `active + worker_enabled + 配置完整` 的用户。
+- 手动任务优先于定时任务，同一用户不会重复排入等价任务。
+- FAFU 401/408 或致命错误只暂停对应用户。
+- 容器重启会把中断的 `running` 任务恢复为 `queued`。
+- 不得增加 Uvicorn worker、容器副本或水平扩容，否则可能重复签到。
+
+持久数据：
+
+- `/data/app.db`：系统配置、用户、会话哈希、OAuth state 哈希、配对哈希、队列、图片元数据、历史和审计
+- `/data/users/{user_id}/avatar`：用户头像
+- `/data/users/{user_id}/images/library`：用户图库
+- `/data/users/{user_id}/images/latest`：用户最新图片队列
+- `/data/logs`：系统结构化日志
+
+## 从旧单用户版本升级
+
+升级前先停止服务并自行备份整个 `web/data`：
 
 ```powershell
 docker compose -f web/docker-compose.yml down
+Copy-Item -Recurse web/data web/data-backup
+docker compose -f web/docker-compose.yml up -d --build
 ```
 
-`down` 不会删除 `web/data`。如需备份，停止服务后复制整个 `web/data` 目录即可。
+`0006` 迁移会：
 
-## 持久化目录
+- 保留测试号 AppID/AppSecret/模板 ID、高德配置和日志级别。
+- 清除旧 OpenID、FAFU Token、关键词、图片策略、Worker 状态、图片记录、图片文件、运行历史和旧日志。
+- 进入系统配置补全/管理员扫码绑定流程；旧业务数据不提供应用内恢复副本。
 
-- `data/app.db`：配置、图片元数据和运行历史
-- `data/images/library`：持久图库
-- `data/images/latest`：最新图片队列；成功上传到远端后核心程序会消费文件
-- `data/logs`：结构化日志及 7 天轮转文件
+`docker compose down` 本身不会删除 bind mount 数据。
 
-容器入口会初始化 bind mount 的目录权限，随后以 UID/GID `10001:10001` 启动 Uvicorn；应用进程不会以 root 身份运行。若部署环境显式禁止容器入口调整权限，请预先将宿主机 `web/data` 授权给该 UID/GID。
+## FAFU 签到与地图
 
-## 旧配置导入
+每位用户可直接填写 `2_` Token，或粘贴完整 Base64 Authorization；后端严格校验后只保存末段 Token。任务列表、详情和手工提交直接复用原项目的 FAFU 服务，提交仍严格执行“详情 → 图片上传 → 签到”。
 
-数据库首次初始化时仅导入一次，优先级如下：
+FAFU 基础地址固定为原明文 `http://stuhtapi.fafu.edu.cn`。多用户、OAuth 和地图改造没有修改 Authorization 算法、请求头、HTTP 方法、端点、参数位置、上传顺序或签到坐标。
 
-1. 环境变量 `FAFU_LEGACY_CONFIG_PATH` 指向的 JSON
-2. `/data/import/config.json`
-3. 项目根目录 `config.json`
+FAFU 坐标固定按 GCJ-02 展示和提交。高德地图仅用于 Marker、逆地理地址、抖动范围和当前位置距离；浏览器当前位置不会保存或用于签到。定位需要 HTTPS 或 localhost。
 
-可访问的旧图片会复制到持久图库，原文件不会删除。导入完成后 Web 模式只读取 SQLite。现有 FAFU 明文 HTTP 地址、签名、端点、请求头和参数均未改变，且基础地址不会出现在管理页面或 API 中。
-
-## 签到任务
-
-Web 自动签到的任务关键词默认为空；空列表不会匹配任何任务，填写一个或多个关键词后才会由后台自动匹配并签到。
-
-管理台的“签到任务”页面直接读取 FAFU 未签到任务分页列表，不受自动签到关键词过滤影响。可查看任务签到位置，并对当前仍在有效时间内的单个任务手动提交签到。提交前服务会重新读取任务来源页确认任务仍有效，随后严格按“详情 → 图片上传 → 签到提交”的既有流程执行。
-
-自动检查、立即检查、任务列表、任务详情和单任务提交共用同一执行槽，任一 FAFU 操作正在进行时其他操作会返回冲突提示；暂停自动检查时仍可浏览或手动提交，完成后保持暂停。任务列表和详情只要求 Token，提交签到还要求图片策略等完整配置。FAFU 鉴权或时间校验失败会暂停自动检查；手动提交失效及上游失败会留下可追踪且已脱敏的运行记录。
-
-
-## 高德地图
-
-高德地图是可选的任务位置展示能力。启用前在高德开放平台创建“Web 端（JS API）”Key，并把部署管理台使用的域名或 IP 加入白名单，然后在系统设置中填写 JS Key 和 Security JS Code。
-
-- JS Key 会发送到浏览器，这是高德 JS API 的正常工作方式；应通过高德控制台的白名单限制使用范围。
-- Security JS Code 只保存在 SQLite，设置读取接口仅返回掩码。浏览器的高德服务请求通过 `/_AMapService` 交给 FastAPI，服务端注入安全密钥。
-- 代理只允许逆地理编码和坐标转换两个高德服务路径，固定访问 `restapi.amap.com`，不接受任意目标地址。
-- FAFU 签到点固定按 GCJ-02 原样展示，地图、地址和距离计算均不改变签到提交坐标。
-- 橙色区域精确表示现有经度、纬度分别 `±jitter` 的随机范围。地图不支持拖动选点，也不会用浏览器当前位置替换任务位置。
-- “获取当前位置”只在点击后申请权限，坐标会经后端代理发送给高德完成 WGS-84 转换，但不会保存、写入查询参数日志或发送给 FAFU。通过局域网普通 HTTP 地址访问时，浏览器通常会禁用定位；改用 HTTPS 或 localhost 后可用，地图其他功能不受影响。
-- 高德服务或网络异常时，任务详情、原始经纬度和手动签到仍可正常使用，容器健康检查也不依赖高德。
-
-本地 Vite 开发服务器已经同时代理 `/api` 和 `/_AMapService`；生产镜像由 FastAPI 在同一端口提供页面与代理，无需额外端口。
-
-## 微信公众号接口测试号通知
-
-设置页可启用微信公众号接口测试号推送。启用前请填写 AppID、AppSecret、模板 ID 和接收人的 OpenID，并在微信公众平台测试号后台创建以下完全匹配的模板：
+测试号模板内容：
 
 ```text
 {{first.DATA}}
@@ -87,39 +108,28 @@ Web 自动签到的任务关键词默认为空；空列表不会匹配任何任�
 {{remark.DATA}}
 ```
 
-设置读取接口只返回 AppSecret/OpenID 的掩码；密码框留空会保留原值，显式清除任一秘密会自动关闭测试号通道。测试按钮只表示发送任务已提交，不代表微信平台最终送达。access_token 仅在线程安全的进程内缓存中保存，不写入 SQLite 或日志。
-## 本地开发
+系统 AppID/AppSecret/模板 ID 全局共享，收件 OpenID 自动取当前执行用户，用户可单独关闭通知。
 
-后端（需先安装项目本身及后端依赖）：
+## 运维与验证
 
 ```powershell
-python -m pip install -e .
-python -m pip install -r web/backend/requirements.txt
-$env:FAFU_DATA_DIR = (Resolve-Path web/data)
-$env:PYTHONPATH = "src;web/backend"
-uvicorn app.main:app --reload --port 8000
+docker compose -f web/docker-compose.yml ps
+docker compose -f web/docker-compose.yml logs -f
 ```
 
-前端开发服务器由 `web/frontend` 提供。生产镜像会先构建前端，再将 `dist` 复制给 FastAPI 提供静态服务。
+健康检查只验证 Web 和 SQLite；未初始化、暂停或单用户调度异常不会使容器不健康。
 
-测试与构建：
+本地验证：
 
 ```powershell
-python -m pip install -e ".[dev]" -r web/backend/requirements-dev.txt
+$env:PYTHONPATH = "src;web/backend"
 python -m pytest
-Push-Location web/backend; python -m pytest; Pop-Location
+python -m pytest web/backend/tests
 Push-Location web/frontend
 npm ci
 npm test
 npm run build
-npx playwright install chromium
 npm run test:e2e
 Pop-Location
+docker build -f web/Dockerfile .
 ```
-
-## 运维约束
-
-- 健康检查只验证 Web 与 SQLite 可用；未配置、暂停或调度异常时仍返回 HTTP 200，并在响应中报告状态。
-- 致命签到错误会自动暂停定时 Worker，修复配置后在管理台恢复。
-- SQLite 使用 WAL、外键检查和 30 秒 busy timeout。
-- 不支持多账号、多副本、高可用或公网安全暴露。

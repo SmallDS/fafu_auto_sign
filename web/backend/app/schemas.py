@@ -12,7 +12,11 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 ImageMode = Literal["single", "library", "latest"]
 RunStatus = Literal["no_task", "success", "partial", "failed", "fatal"]
-WorkerState = Literal["unconfigured", "idle", "executing", "paused", "error", "stopping"]
+WorkerState = Literal[
+    "unconfigured", "idle", "queued", "executing", "paused", "error", "stopping"
+]
+UserRole = Literal["admin", "user"]
+UserStatus = Literal["profile_pending", "pending", "active", "rejected", "disabled"]
 
 
 class SettingsRead(BaseModel):
@@ -22,22 +26,11 @@ class SettingsRead(BaseModel):
     user_token_masked: str | None
     jitter: float
     heartbeat_interval: int
-    log_level: str
-    amap_enabled: bool
-    amap_js_key: str | None
-    has_amap_security_js_code: bool
-    amap_security_js_code_masked: str | None
-    wechat_test_enabled: bool
-    wechat_test_app_id: str | None
-    wechat_test_template_id: str | None
-    has_wechat_test_app_secret: bool
-    wechat_test_app_secret_masked: str | None
-    has_wechat_test_openid: bool
-    wechat_test_openid_masked: str | None
     task_keywords: list[str]
     image_mode: ImageMode
     selected_image_id: str | None
     worker_enabled: bool
+    notification_enabled: bool
 
 
 class SettingsUpdate(BaseModel):
@@ -45,35 +38,21 @@ class SettingsUpdate(BaseModel):
     clear_user_token: bool = False
     jitter: float | None = Field(default=None, ge=0, le=0.001)
     heartbeat_interval: int | None = Field(default=None, ge=10, le=86400)
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None = None
-    amap_enabled: bool | None = None
-    amap_js_key: str | None = None
-    amap_security_js_code: str | None = None
-    clear_amap_security_js_code: bool = False
-    wechat_test_enabled: bool | None = None
-    wechat_test_app_id: str | None = None
-    wechat_test_app_secret: str | None = None
-    clear_wechat_test_app_secret: bool = False
-    wechat_test_template_id: str | None = None
-    wechat_test_openid: str | None = None
-    clear_wechat_test_openid: bool = False
     task_keywords: list[str] | None = None
     image_mode: ImageMode | None = None
     selected_image_id: str | None = None
     worker_enabled: bool | None = None
+    notification_enabled: bool | None = None
 
     @field_validator("user_token", mode="before")
     @classmethod
     def normalize_user_token(cls, value: object) -> object:
-        """Accept a raw USER_TOKEN or extract it from a full Authorization value."""
+        """Accept a raw USER_TOKEN or extract it from a complete Authorization value."""
         if value is None or not isinstance(value, str):
             return value
         candidate = value.strip()
-        if not candidate:
+        if not candidate or candidate.startswith("2_"):
             return candidate
-        if candidate.startswith("2_"):
-            return candidate
-
         message = "请输入以 2_ 开头的用户 Token，或有效的完整 Base64 Authorization"
         try:
             decoded_bytes = base64.b64decode(candidate, validate=True)
@@ -82,7 +61,6 @@ class SettingsUpdate(BaseModel):
             decoded = decoded_bytes.decode("utf-8")
         except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
             raise ValueError(message) from exc
-
         parts = decoded.split(":")
         if (
             len(parts) != 4
@@ -95,27 +73,187 @@ class SettingsUpdate(BaseModel):
             raise ValueError(message)
         return parts[3]
 
-    @field_validator("amap_js_key", "amap_security_js_code")
-    @classmethod
-    def trim_amap_credentials(cls, value: str | None) -> str | None:
-        if value is None:
-            return value
-        return value.strip()
-
     @field_validator("task_keywords")
     @classmethod
     def validate_keywords(cls, value: list[str] | None) -> list[str] | None:
-        if value is None:
-            return value
-        return [item.strip() for item in value if item.strip()]
+        return None if value is None else [item.strip() for item in value if item.strip()]
 
     @model_validator(mode="after")
     def validate_secret_actions(self) -> "SettingsUpdate":
         if self.clear_user_token and self.user_token:
             raise ValueError("不能同时设置并清除 Token")
-        if self.clear_amap_security_js_code and self.amap_security_js_code:
-            raise ValueError("不能同时设置并清除高德 Security JS Code")
         return self
+
+
+class SystemSettingsRead(BaseModel):
+    setup_state: Literal["uninitialized", "system_configured", "admin_binding", "initialized"]
+    public_base_url: str | None
+    menu_name: str
+    wechat_app_id: str | None
+    wechat_template_id: str | None
+    wechat_enabled: bool
+    has_wechat_app_secret: bool
+    wechat_app_secret_masked: str | None
+    amap_enabled: bool
+    amap_js_key: str | None
+    has_amap_security_js_code: bool
+    amap_security_js_code_masked: str | None
+    log_level: str
+    menu_synced_at: datetime | None
+
+
+class SystemSettingsUpdate(BaseModel):
+    public_base_url: str | None = None
+    menu_name: str | None = Field(default=None, min_length=1, max_length=32)
+    wechat_app_id: str | None = None
+    wechat_app_secret: str | None = None
+    clear_wechat_app_secret: bool = False
+    wechat_template_id: str | None = None
+    wechat_enabled: bool | None = None
+    amap_enabled: bool | None = None
+    amap_js_key: str | None = None
+    amap_security_js_code: str | None = None
+    clear_amap_security_js_code: bool = False
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None = None
+
+    @field_validator(
+        "public_base_url",
+        "menu_name",
+        "wechat_app_id",
+        "wechat_app_secret",
+        "wechat_template_id",
+        "amap_js_key",
+        "amap_security_js_code",
+    )
+    @classmethod
+    def trim_strings(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @field_validator("public_base_url")
+    @classmethod
+    def validate_public_url(cls, value: str | None) -> str | None:
+        if value is not None and value and not value.startswith("https://"):
+            raise ValueError("公网地址必须使用 HTTPS")
+        return value.rstrip("/") if value else value
+
+
+class BootstrapSystemRequest(BaseModel):
+    wechat_app_id: str = Field(min_length=1)
+    wechat_app_secret: str = Field(min_length=1)
+    wechat_template_id: str = Field(min_length=1)
+    public_base_url: str
+    menu_name: str = Field(default="签到管理", min_length=1, max_length=32)
+    amap_enabled: bool = False
+    amap_js_key: str | None = None
+    amap_security_js_code: str | None = None
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+
+    @field_validator(
+        "wechat_app_id", "wechat_app_secret", "wechat_template_id",
+        "public_base_url", "menu_name", "amap_js_key", "amap_security_js_code",
+    )
+    @classmethod
+    def strip_values(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @field_validator("public_base_url")
+    @classmethod
+    def require_https(cls, value: str) -> str:
+        if not value.startswith("https://"):
+            raise ValueError("公网地址必须使用 HTTPS")
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def validate_amap(self) -> "BootstrapSystemRequest":
+        if self.amap_enabled and not (self.amap_js_key and self.amap_security_js_code):
+            raise ValueError("启用高德地图前必须完整填写 JS Key 和 Security JS Code")
+        return self
+
+
+class BootstrapStatus(BaseModel):
+    setup_state: Literal["uninitialized", "system_configured", "admin_binding", "initialized"]
+    initialized: bool
+    system_configured: bool
+    admin_binding: bool
+    requires_system_configuration: bool
+
+
+class PairingRead(BaseModel):
+    id: str
+    kind: Literal["admin", "login"]
+    status: str
+    auth_url: str | None = None
+    expires_at: datetime
+    user_status: str | None = None
+
+
+class ProfileUpdate(BaseModel):
+    nickname: str = Field(min_length=1, max_length=64)
+
+
+class AuthUserRead(BaseModel):
+    id: str
+    nickname: str | None
+    avatar_url: str | None
+    role: UserRole
+    status: UserStatus
+    rejection_reason: str | None
+    csrf_token: str | None = None
+
+
+class SessionRead(BaseModel):
+    id: str
+    device_type: str
+    user_agent: str
+    created_at: datetime
+    last_seen_at: datetime
+    expires_at: datetime
+    current: bool
+
+
+class UserAdminRead(BaseModel):
+    id: str
+    openid: str
+    unionid: str | None
+    nickname: str | None
+    avatar_url: str | None
+    role: UserRole
+    status: UserStatus
+    rejection_reason: str | None
+    configured: bool
+    worker_enabled: bool
+    last_login_at: datetime | None
+    created_at: datetime
+
+
+class UserPage(BaseModel):
+    items: list[UserAdminRead]
+    total: int
+    page: int
+    page_size: int
+
+
+class UserAdminUpdate(BaseModel):
+    status: Literal["pending", "active", "rejected", "disabled"] | None = None
+    role: UserRole | None = None
+    rejection_reason: str | None = Field(default=None, max_length=500)
+
+
+class AuditLogRead(BaseModel):
+    id: int
+    actor_user_id: str | None
+    target_user_id: str | None
+    action: str
+    result: str
+    detail: str | None
+    created_at: datetime
+
+
+class AuditPage(BaseModel):
+    items: list[AuditLogRead]
+    total: int
+    page: int
+    page_size: int
 
 
 class MapConfigRead(BaseModel):
@@ -194,6 +332,7 @@ class SignTaskSubmit(BaseModel):
 class WorkerActionResponse(BaseModel):
     state: WorkerState
     message: str
+    job_id: str | None = None
 
 
 class StatusResponse(BaseModel):
@@ -211,6 +350,7 @@ class HealthResponse(BaseModel):
     database: Literal["ok"] = "ok"
     worker_state: WorkerState
     configured: bool
+    setup_state: str = "uninitialized"
 
 
 class LogEntry(BaseModel):

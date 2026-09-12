@@ -14,28 +14,20 @@ from PIL import UnidentifiedImageError
 from sqlalchemy.orm import Session
 
 from app.models import Image
-from app.paths import LATEST_DIR, LIBRARY_DIR
+from app.paths import LATEST_DIR, LIBRARY_DIR, user_image_dir
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_UPLOAD_FILES = 10
 MAX_IMAGE_PIXELS = 40_000_000
-FORMAT_TO_EXTENSION = {
-    "JPEG": ".jpg",
-    "PNG": ".png",
-    "GIF": ".gif",
-    "WEBP": ".webp",
-}
+FORMAT_TO_EXTENSION = {"JPEG": ".jpg", "PNG": ".png", "GIF": ".gif", "WEBP": ".webp"}
 FORMAT_TO_MIME = {
-    "JPEG": "image/jpeg",
-    "PNG": "image/png",
-    "GIF": "image/gif",
-    "WEBP": "image/webp",
+    "JPEG": "image/jpeg", "PNG": "image/png", "GIF": "image/gif", "WEBP": "image/webp"
 }
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 
 class InvalidImage(ValueError):
-    """Raised when uploaded image data fails validation."""
+    pass
 
 
 def _validate(content: bytes, original_name: str) -> tuple[str, str]:
@@ -59,9 +51,8 @@ def _validate(content: bytes, original_name: str) -> tuple[str, str]:
     if detected not in FORMAT_TO_EXTENSION:
         raise InvalidImage("图片格式不受支持")
     expected = FORMAT_TO_EXTENSION[detected]
-    if suffix == ".jpeg":
-        suffix = ".jpg"
-    if suffix != expected:
+    normalized_suffix = ".jpg" if suffix == ".jpeg" else suffix
+    if normalized_suffix != expected:
         raise InvalidImage("文件扩展名与实际图片格式不一致")
     return expected, FORMAT_TO_MIME[detected]
 
@@ -72,15 +63,19 @@ def store_bytes(
     original_name: str,
     purpose: str,
     *,
+    user_id: str | None = None,
     commit: bool = True,
 ) -> Image:
-    """Validate and atomically persist bytes plus metadata."""
     if purpose not in {"library", "latest"}:
         raise InvalidImage("图片用途必须为 library 或 latest")
     extension, mime = _validate(content, original_name)
     image_id = str(uuid.uuid4())
     storage_name = f"{image_id}{extension}"
-    root = LIBRARY_DIR if purpose == "library" else LATEST_DIR
+    root = (
+        user_image_dir(user_id, purpose)
+        if user_id
+        else LIBRARY_DIR if purpose == "library" else LATEST_DIR
+    )
     root.mkdir(parents=True, exist_ok=True)
     final_path = root / storage_name
     temp_path = root / f".{storage_name}.tmp"
@@ -89,6 +84,7 @@ def store_bytes(
         os.replace(temp_path, final_path)
         row = Image(
             id=image_id,
+            user_id=user_id,
             purpose=purpose,
             original_name=Path(original_name).name,
             storage_name=storage_name,
@@ -114,9 +110,16 @@ async def store_upload(
     upload: UploadFile,
     purpose: str,
     *,
+    user_id: str | None = None,
     commit: bool = True,
 ) -> Image:
-    """Read a bounded upload and persist it."""
     content = await upload.read(MAX_IMAGE_BYTES + 1)
     await upload.close()
-    return store_bytes(session, content, upload.filename or "upload", purpose, commit=commit)
+    return store_bytes(
+        session,
+        content,
+        upload.filename or "upload",
+        purpose,
+        user_id=user_id,
+        commit=commit,
+    )

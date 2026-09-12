@@ -36,13 +36,13 @@
 
 #### Docker Web 管理台（推荐）
 
-项目提供单容器 Web 管理台，可在浏览器中维护配置、图片，查看运行状态、历史和日志。配置与运行数据持久化到 `web/data`。
+项目提供单容器、多用户 Web 管理台。用户通过微信公众号测试号注册或扫码登录，管理员审核后，每位用户独立维护 FAFU 配置、图片、历史与微信通知；系统使用全局单队列串行签到。数据持久化到 `web/data`。
 
 ```powershell
 docker compose -f web/docker-compose.yml up -d --build
 ```
 
-启动后访问 <http://localhost:8000>。管理台无登录鉴权，Token、测试号 AppSecret、OpenID 与高德 Security JS Code 以明文保存在 SQLite 中，**只能在可信局域网使用，不要直接暴露到公网**。完整部署、迁移和运维说明见 [web/README.md](web/README.md)。
+部署公网 HTTPS 反向代理后访问管理台并完成“测试号设置 → 管理员扫码”初始化。AppSecret、FAFU Token 与高德 Security JS Code 以明文保存在 SQLite，API 仅返回掩码；部署、升级和微信回调配置见 [web/README.md](web/README.md)。
 
 Web 可选接入高德地图，在签到任务详情中展示位置、逆地理地址、GPS 随机偏移范围及当前位置距离。地图坐标转换仅用于显示，FAFU 的原始明文 HTTP 请求和签到坐标不会改变。
 

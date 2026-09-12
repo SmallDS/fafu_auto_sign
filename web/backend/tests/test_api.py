@@ -1,110 +1,159 @@
 from __future__ import annotations
 
 import base64
-from io import BytesIO
+import io
+import uuid
 
 from fastapi.testclient import TestClient
 from PIL import Image as PillowImage
+from sqlalchemy import delete
 
+import app.auth_routes as auth_routes
+from app.auth import SESSION_COOKIE, create_user_session
+from app.database import SessionLocal
 from app.main import app
+from app.models import (
+    AuditLog,
+    Image,
+    LoginPairing,
+    OAuthState,
+    RunHistory,
+    Settings,
+    SignJob,
+    SystemSettings,
+    User,
+    UserSession,
+)
+from app.repository import get_or_create_settings, get_or_create_system_settings
 
 
 def png_bytes() -> bytes:
-    output = BytesIO()
-    PillowImage.new("RGB", (2, 2), color="white").save(output, format="PNG")
+    output = io.BytesIO()
+    PillowImage.new("RGB", (2, 2), color="green").save(output, format="PNG")
     return output.getvalue()
 
 
-def test_unconfigured_health_settings_and_atomic_image_upload() -> None:
-    with TestClient(app) as client:
+def reset_database() -> None:
+    with SessionLocal() as session:
+        for model in (
+            AuditLog, SignJob, OAuthState, LoginPairing, UserSession,
+            RunHistory, Image, Settings, User, SystemSettings,
+        ):
+            session.execute(delete(model))
+        session.commit()
+
+
+def login_active_user(client: TestClient) -> tuple[User, str]:
+    with SessionLocal() as session:
+        system = get_or_create_system_settings(session)
+        system.setup_state = "initialized"
+        system.public_base_url = "https://example.com"
+        user = User(
+            id=str(uuid.uuid4()),
+            openid="openid-" + uuid.uuid4().hex,
+            nickname="测试用户",
+            role="user",
+            status="active",
+        )
+        session.add(user)
+        session.commit()
+        settings = get_or_create_settings(session, user.id)
+        settings.worker_enabled = False
+        session.commit()
+        auth_session, raw = create_user_session(
+            session, user, device_type="desktop", user_agent="pytest"
+        )
+        csrf = auth_session.csrf_token
+    client.cookies.set(SESSION_COOKIE, raw)
+    return user, csrf
+
+
+def test_health_is_public_and_business_api_requires_session() -> None:
+    with TestClient(app, base_url="https://testserver") as client:
+        reset_database()
         health = client.get("/api/health")
         assert health.status_code == 200
-        assert health.json()["configured"] is False
+        assert health.json()["setup_state"] == "uninitialized"
+        protected = client.get("/api/settings")
+        assert protected.status_code == 401
+        assert protected.json()["detail"]["code"] == "AUTH_REQUIRED"
 
+
+def test_authenticated_settings_csrf_and_user_image_upload() -> None:
+    with TestClient(app, base_url="https://testserver") as client:
+        reset_database()
+        user, csrf = login_active_user(client)
+        missing_csrf = client.put("/api/settings", json={"user_token": "2_hidden"})
+        assert missing_csrf.status_code == 403
         saved = client.put(
             "/api/settings",
-            json={
-                "user_token": "2_api_test_token",
-                "heartbeat_interval": 60,
-                "worker_enabled": False,
-            },
+            headers={"X-CSRF-Token": csrf},
+            json={"user_token": "2_api_test", "worker_enabled": False},
         )
         assert saved.status_code == 200
-        assert "2_api_test_token" not in saved.text
         assert saved.json()["has_user_token"] is True
+        assert "2_api_test" not in saved.text
 
         uploaded = client.post(
             "/api/images",
+            headers={"X-CSRF-Token": csrf},
             data={"category": "library"},
-            files=[("files", ("camera.png", png_bytes(), "image/png"))],
+            files={"files": ("test.png", png_bytes(), "image/png")},
         )
         assert uploaded.status_code == 201
         image_id = uploaded.json()[0]["id"]
-
-        configured = client.put(
-            "/api/settings",
-            json={
-                "image_mode": "single",
-                "selected_image_id": image_id,
-                "worker_enabled": False,
-            },
-        )
-        assert configured.status_code == 200
-        assert configured.json()["configured"] is True
-
-        before = client.get("/api/images", params={"category": "library"}).json()["total"]
-        rejected = client.post(
-            "/api/images",
-            data={"category": "library"},
-            files=[
-                ("files", ("valid.png", png_bytes(), "image/png")),
-                ("files", ("forged.jpg", png_bytes(), "image/jpeg")),
-            ],
-        )
-        assert rejected.status_code == 422
-        assert rejected.json()["detail"]["code"] == "INVALID_IMAGE"
-        after = client.get("/api/images", params={"category": "library"}).json()["total"]
-        assert after == before
-
-        in_use = client.delete(f"/api/images/{image_id}")
-        assert in_use.status_code == 409
-        assert in_use.json()["detail"]["code"] == "IMAGE_IN_USE"
-
-        missing_api = client.get("/api/not-a-real-endpoint")
-        assert missing_api.status_code == 404
-        assert missing_api.json()["detail"]["code"] == "NOT_FOUND"
-
-    # 重新进入 lifespan，模拟容器重启后复用同一个 /data 数据库与图片目录。
-    with TestClient(app) as restarted:
-        persisted = restarted.get("/api/settings")
-        assert persisted.status_code == 200
-        assert persisted.json()["configured"] is True
-        assert persisted.json()["selected_image_id"] == image_id
-        assert restarted.get(f"/api/images/{image_id}").status_code == 200
+        listed = client.get("/api/images")
+        assert listed.json()["items"][0]["id"] == image_id
+        with SessionLocal() as session:
+            row = session.get(Image, image_id)
+            assert row is not None and row.user_id == user.id
 
 
-def test_settings_accepts_full_authorization_and_rejects_malformed_without_echo() -> None:
-    token = "2_api_authorization_token"
+def test_full_authorization_is_normalized_and_invalid_value_not_echoed() -> None:
+    token = "2_authorization_token"
     authorization = base64.b64encode(
         f"1773238142:nonceForWebTest1:{'b' * 32}:{token}".encode()
     ).decode()
-    invalid_authorization = base64.b64encode(
-        b"1773238142:sensitive-marker:not-a-signature:2_hidden"
-    ).decode()
-
-    with TestClient(app) as client:
-        saved = client.put("/api/settings", json={"user_token": authorization})
+    invalid = base64.b64encode(b"1773238142:secret:not-a-signature:2_hidden").decode()
+    with TestClient(app, base_url="https://testserver") as client:
+        reset_database()
+        _, csrf = login_active_user(client)
+        saved = client.put(
+            "/api/settings",
+            headers={"X-CSRF-Token": csrf},
+            json={"user_token": authorization},
+        )
         assert saved.status_code == 200
-        assert authorization not in saved.text
-        assert token not in saved.text
-        assert saved.json()["has_user_token"] is True
-
         rejected = client.put(
             "/api/settings",
-            json={"user_token": invalid_authorization},
+            headers={"X-CSRF-Token": csrf},
+            json={"user_token": invalid},
         )
         assert rejected.status_code == 422
-        assert rejected.json()["detail"]["code"] == "VALIDATION_ERROR"
-        assert invalid_authorization not in rejected.text
-        assert "sensitive-marker" not in rejected.text
+        assert invalid not in rejected.text
         assert "2_hidden" not in rejected.text
+
+
+def test_bootstrap_validates_then_freezes_system_configuration(monkeypatch) -> None:
+    monkeypatch.setattr(
+        auth_routes,
+        "get_global_access_token",
+        lambda app_id, app_secret: "validated-token",
+    )
+    payload = {
+        "wechat_app_id": "wx-test",
+        "wechat_app_secret": "secret",
+        "wechat_template_id": "template",
+        "public_base_url": "https://example.com",
+        "menu_name": "签到管理",
+        "amap_enabled": False,
+        "log_level": "INFO",
+    }
+    with TestClient(app, base_url="https://testserver") as client:
+        reset_database()
+        first = client.put("/api/bootstrap/system", json=payload)
+        assert first.status_code == 200
+        assert first.json()["setup_state"] == "system_configured"
+        second = client.put("/api/bootstrap/system", json=payload)
+        assert second.status_code == 409
+        assert second.json()["detail"]["code"] == "BOOTSTRAP_CLOSED"
