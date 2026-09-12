@@ -14,10 +14,11 @@ import {
   Typography,
   Upload,
 } from 'antd';
-import type { UploadFile } from 'antd';
+import type { UploadFile, UploadProps } from 'antd';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { PageHeading } from '../components/PageHeading';
+import { PageSkeleton } from '../components/PageSkeleton';
 import type { ImageCategory, ImageRecord, Settings } from '../types/api';
 
 const { Dragger } = Upload;
@@ -61,6 +62,24 @@ export function ImagesPage(): ReactNode {
   useEffect(() => {
     void load(page, category);
   }, [page, category]);
+
+  const beforeUpload: UploadProps['beforeUpload'] = (file) => {
+    if (file.size > 10 * 1024 * 1024) {
+      message.error(`${file.name} 超过 10 MiB`);
+      return Upload.LIST_IGNORE;
+    }
+    return false;
+  };
+
+  const appendFiles = (nextFiles: UploadFile[]): void => {
+    setFileList((current) => {
+      const merged = new Map(current.map((item) => [item.uid, item]));
+      nextFiles.forEach((item) => merged.set(item.uid, item));
+      const result = [...merged.values()];
+      if (result.length > 10) message.warning('每次最多选择 10 张图片');
+      return result.slice(-10);
+    });
+  };
 
   const upload = async (): Promise<void> => {
     const files = fileList.flatMap((item) => item.originFileObj ? [item.originFileObj] : []);
@@ -113,6 +132,10 @@ export function ImagesPage(): ReactNode {
     });
   };
 
+  if (loading) {
+    return <div className="page-container"><PageSkeleton variant="gallery" /></div>;
+  }
+
   return (
     <div className="page-container">
       <PageHeading title="图片管理" description="维护持久图库与最新图片队列，单张图片最大 10 MiB。" />
@@ -127,27 +150,44 @@ export function ImagesPage(): ReactNode {
           multiple
           maxCount={10}
           accept={ACCEPTED}
-          capture="environment"
+          openFileDialogOnClick={false}
           fileList={fileList}
-          beforeUpload={(file) => {
-            if (file.size > 10 * 1024 * 1024) {
-              message.error(`${file.name} 超过 10 MiB`);
-              return Upload.LIST_IGNORE;
-            }
-            return false;
-          }}
+          beforeUpload={beforeUpload}
           onChange={({ fileList: next }) => setFileList(next.slice(-10))}
           onRemove={(file) => { setFileList((items) => items.filter((item) => item.uid !== file.uid)); return true; }}
           disabled={uploading}
         >
           <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-          <p className="ant-upload-text">点击、拖放或拍照选择图片</p>
-          <p className="ant-upload-hint">支持 JPG、JPEG、PNG、GIF、WEBP，一次最多 10 张</p>
+          <p className="ant-upload-text">拖放图片到这里</p>
+          <p className="ant-upload-hint">也可以使用下方的拍照或选择图片按钮</p>
         </Dragger>
         <div className="upload-actions">
           <Typography.Text type="secondary">已选择 {fileList.length} 张</Typography.Text>
-          <Space wrap>
-            <Button icon={<CameraOutlined />} onClick={() => document.querySelector<HTMLElement>('.ant-upload input')?.click()}>拍照 / 选择</Button>
+          <Space wrap className="upload-button-group">
+            <Upload
+              accept="image/*"
+              capture="environment"
+              multiple={false}
+              fileList={[]}
+              showUploadList={false}
+              beforeUpload={beforeUpload}
+              onChange={({ fileList: next }) => appendFiles(next)}
+              disabled={uploading}
+            >
+              <Button icon={<CameraOutlined />} disabled={uploading}>拍照</Button>
+            </Upload>
+            <Upload
+              accept={ACCEPTED}
+              multiple
+              maxCount={10}
+              fileList={[]}
+              showUploadList={false}
+              beforeUpload={beforeUpload}
+              onChange={({ fileList: next }) => appendFiles(next)}
+              disabled={uploading}
+            >
+              <Button icon={<UploadOutlined />} disabled={uploading}>选择图片</Button>
+            </Upload>
             <Button type="primary" icon={<UploadOutlined />} loading={uploading} disabled={!fileList.length} onClick={() => void upload()}>开始上传</Button>
           </Space>
         </div>
@@ -158,9 +198,7 @@ export function ImagesPage(): ReactNode {
         <Typography.Text type="secondary">共 {total} 张</Typography.Text>
       </div>
 
-      {loading ? (
-        <Row gutter={[16, 16]}>{Array.from({ length: 8 }, (_, index) => <Col xs={12} sm={8} md={6} xl={4} key={index}><Card loading /></Col>)}</Row>
-      ) : images.length === 0 ? (
+      {images.length === 0 ? (
         <Card><Empty description="这里还没有图片" /></Card>
       ) : (
         <>

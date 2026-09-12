@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { PageHeading } from '../components/PageHeading';
+import { PageSkeleton } from '../components/PageSkeleton';
 import type { LogEntry, LogLevel } from '../types/api';
 
 const levelColors: Record<string, string> = {
@@ -72,6 +73,8 @@ export function LogsPage(): ReactNode {
       message.error('浏览器未允许复制，请手动选择日志文本');
     }
   };
+
+  if (loading && entries.length === 0) return <div className="page-container"><PageSkeleton variant="logs" /></div>;
 
   return (
     <div className="page-container">

@@ -2,6 +2,7 @@ import { Alert, App, Button, Card, Form, Input, Select, Space, Switch, Typograph
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { PageHeading } from '../components/PageHeading';
+import { PageSkeleton } from '../components/PageSkeleton';
 import type { SystemSettingsUpdate } from '../types/api';
 
 function menuNameLength(value: string): number {
@@ -69,6 +70,8 @@ export function AdminSystemPage(): ReactNode {
       },
     });
   };
+
+  if (loading) return <div className="page-container narrow-page"><PageSkeleton variant="form" /></div>;
 
   return (
     <div className="page-container narrow-page">

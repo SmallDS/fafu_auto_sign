@@ -1,4 +1,4 @@
-import { Button, Result, Spin } from 'antd';
+import { Button, Card, Result, Skeleton } from 'antd';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ApiError, api, getErrorMessage, setCsrfToken } from '../api/client';
 import type { AuthUser, BootstrapStatus } from '../types/api';
@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
   }), [bootstrap, loading, refresh, user]);
 
   if (loading) {
-    return <div className="center-screen"><Spin size="large" /></div>;
+    return <div className="center-screen auth-bootstrap-loading" aria-busy="true" aria-label="系统加载中"><Card className="auth-card"><Skeleton active avatar paragraph={{ rows: 4 }} /></Card></div>;
   }
   if (fatalError) {
     return (

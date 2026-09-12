@@ -17,7 +17,7 @@ export function PendingPage(): ReactNode {
       setReason(data.rejection_reason ?? '');
       if (data.status === 'active') {
         events.close();
-        void refresh().then(() => window.location.assign('/settings'));
+        void refresh().then(() => window.location.assign('/profile'));
       }
     };
     events.addEventListener('status', update as EventListener);

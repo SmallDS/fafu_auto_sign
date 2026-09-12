@@ -22,7 +22,7 @@ describe('AppShell', () => {
     expect(screen.getByText('页面内容')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
     expect(screen.getByText('概览')).toBeInTheDocument();
-    expect(screen.getByText('签到设置')).toBeInTheDocument();
+    expect(screen.getByText('规则签到')).toBeInTheDocument();
   });
 
   it('显示本地化状态', () => {

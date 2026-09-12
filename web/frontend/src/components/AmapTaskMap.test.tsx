@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MapConfig, SignTaskDetails } from '../types/api';
@@ -37,6 +37,9 @@ function installAmapMock() {
   const polygonOptions: OverlayOptions[] = [];
   const mapDestroy = vi.fn();
   const mapRemove = vi.fn();
+  const mapOn = vi.fn();
+  const mapOff = vi.fn();
+  let mapClickHandler: ((event: { lnglat: Coordinate }) => void) | null = null;
 
   class MapMock {
     constructor(_container: HTMLElement, _options: Record<string, unknown>) {}
@@ -44,6 +47,14 @@ function installAmapMock() {
     remove(overlays: unknown): void { mapRemove(overlays); }
     destroy(): void { mapDestroy(); }
     resize(): void {}
+    on(event: string, handler: (event: { lnglat: Coordinate }) => void): void {
+      mapOn(event, handler);
+      if (event === 'click') mapClickHandler = handler;
+    }
+    off(event: string, handler: (event: { lnglat: Coordinate }) => void): void {
+      mapOff(event, handler);
+      if (mapClickHandler === handler) mapClickHandler = null;
+    }
     setFitView(): void {}
   }
   class MarkerMock {
@@ -98,7 +109,17 @@ function installAmapMock() {
     convertFrom,
   } as unknown as AmapNamespace;
   window.AMap = amap;
-  return { amap, added, polygonOptions, convertFrom, mapDestroy, mapRemove };
+  return {
+    amap,
+    added,
+    polygonOptions,
+    convertFrom,
+    mapDestroy,
+    mapRemove,
+    mapOn,
+    mapOff,
+    triggerMapClick: (coordinate: Coordinate) => mapClickHandler?.({ lnglat: coordinate }),
+  };
 }
 
 afterEach(() => {
@@ -187,6 +208,31 @@ describe('AmapTaskMap component', () => {
 
     unmount();
     expect(mapDestroy).toHaveBeenCalledOnce();
+  });
+
+  it('手动选点回传 GCJ-02 坐标并在卸载时移除监听', async () => {
+    const { triggerMapClick, mapOn, mapOff } = installAmapMock();
+    const onSelectCoordinate = vi.fn();
+    const { unmount } = render(
+      <ConfigProvider>
+        <AmapTaskMap
+          details={details}
+          config={enabledConfig}
+          selectionEnabled
+          jitterOverride={0}
+          onSelectCoordinate={onSelectCoordinate}
+        />
+      </ConfigProvider>,
+    );
+
+    await screen.findByText(/点击地图可选择本次签到位置/);
+    expect(mapOn).toHaveBeenCalledWith('click', expect.any(Function));
+    act(() => triggerMapClick([118.123456, 25.654321]));
+    expect(onSelectCoordinate).toHaveBeenCalledWith([118.123456, 25.654321]);
+    expect(screen.queryByText(/橙色区域/)).not.toBeInTheDocument();
+
+    unmount();
+    expect(mapOff).toHaveBeenCalledWith('click', expect.any(Function));
   });
 
   it('用户点击后才获取当前位置并显示距离', async () => {

@@ -12,6 +12,7 @@ import type { ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { AsyncState } from '../components/AsyncState';
 import { PageHeading } from '../components/PageHeading';
+import { PageSkeleton } from '../components/PageSkeleton';
 import { RunResultTag, WorkerStatusTag } from '../components/StatusTag';
 import { usePolling } from '../hooks/usePolling';
 import type { StatusResponse } from '../types/api';
@@ -38,6 +39,10 @@ export function DashboardPage(): ReactNode {
   const state = current?.worker_state;
   const stats = current?.stats_7d ?? {};
 
+  if (status.loading && !current) {
+    return <div className="page-container"><PageSkeleton variant="dashboard" /></div>;
+  }
+
   return (
     <div className="page-container">
       <PageHeading
@@ -63,8 +68,8 @@ export function DashboardPage(): ReactNode {
                 type="warning"
                 showIcon
                 message="尚未完成配置"
-                description="请先在设置页填写 Token 并上传签到图片，后台任务不会在配置完成前发起请求。"
-                action={<Button href="/settings" size="small">前往设置</Button>}
+                description="请先在个人中心填写 Token，并在规则签到与图片页面完成配置。"
+                action={<Button href="/profile" size="small">配置 Token</Button>}
               />
             )}
             {current.last_error && (

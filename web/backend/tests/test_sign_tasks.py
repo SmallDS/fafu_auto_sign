@@ -121,6 +121,91 @@ def test_manual_submit_rechecks_page_persists_history_and_stays_paused(
     assert worker.snapshot()["state"] == "paused"
 
 
+@pytest.mark.parametrize(
+    ("jitter_override", "coordinate_override", "expected_jitter"),
+    (
+        (0.0002, None, 0.0002),
+        (None, (119.123456, 26.654321), 0.0),
+    ),
+)
+def test_manual_submit_applies_one_time_location_options_without_persisting(
+    db_session: Session,
+    tmp_path,
+    monkeypatch,
+    jitter_override: float | None,
+    coordinate_override: tuple[float, float] | None,
+    expected_jitter: float,
+) -> None:
+    configure_signing(db_session, tmp_path, monkeypatch)
+    settings = get_or_create_settings(db_session)
+    settings.jitter = 0.00005
+    db_session.commit()
+    original_version = settings.config_version
+    original_next_run_at = settings.next_run_at
+    now = datetime.now(timezone.utc)
+    page = SignTaskPage(
+        items=(
+            SignTask(
+                id="7",
+                name="课堂签到",
+                begin_time=int((now - timedelta(minutes=1)).timestamp() * 1000),
+                end_time=int((now + timedelta(minutes=1)).timestamp() * 1000),
+            ),
+        ),
+        page=1,
+        page_size=20,
+        total=1,
+        has_more=False,
+    )
+    summary = RunSummary(
+        trigger="manual",
+        config_version=original_version,
+        status="success",
+        started_at=now,
+        finished_at=now,
+        task_results=(TaskRunResult("7", "success", now, now),),
+        discovered_task_count=1,
+    )
+    captured: dict[str, object] = {}
+
+    class FakeExecutor:
+        def __init__(self, config) -> None:
+            captured["jitter"] = config.jitter
+            self.task_service = SimpleNamespace(
+                get_pending_task_page=lambda _page, _page_size: page
+            )
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def execute_task_once(self, *_args, **kwargs):
+            captured["coordinate_override"] = kwargs["coordinate_override"]
+            return summary
+
+    monkeypatch.setattr(manual_module, "SignExecutor", FakeExecutor)
+
+    ManualSignService(WorkerManager()).submit(
+        db_session,
+        task_id=7,
+        source_page=1,
+        page_size=20,
+        jitter_override=jitter_override,
+        coordinate_override=coordinate_override,
+    )
+
+    db_session.refresh(settings)
+    assert captured == {
+        "jitter": expected_jitter,
+        "coordinate_override": coordinate_override,
+    }
+    assert settings.jitter == 0.00005
+    assert settings.config_version == original_version
+    assert settings.next_run_at == original_next_run_at
+
+
 def test_external_execution_slot_is_released_after_upstream_error(
     db_session: Session, tmp_path, monkeypatch
 ) -> None:
@@ -202,7 +287,19 @@ def test_sign_task_detail_submit_and_busy_api_mapping(db_session: Session, monke
         "get_details",
         lambda _session, task_id, **_kwargs: TaskDetails(task_id, 456, 118.1, 25.1, "宿舍楼"),
     )
-    submit = lambda _session, task_id, source_page, page_size, **_kwargs: run
+    submissions: list[dict[str, object]] = []
+
+    def submit(_session, task_id, source_page, page_size, **kwargs):
+        submissions.append(
+            {
+                "task_id": task_id,
+                "source_page": source_page,
+                "page_size": page_size,
+                **kwargs,
+            }
+        )
+        return run
+
     monkeypatch.setattr(manual_sign, "submit", submit)
 
     def override_db():
@@ -216,6 +313,25 @@ def test_sign_task_detail_submit_and_busy_api_mapping(db_session: Session, monke
         submitted = client.post(
             "/api/sign-tasks/123/submit",
             json={"source_page": 2, "page_size": 10},
+        )
+        manual_point = client.post(
+            "/api/sign-tasks/123/submit",
+            json={
+                "source_page": 3,
+                "page_size": 15,
+                "location_mode": "manual_point",
+                "longitude": 119.123456,
+                "latitude": 26.654321,
+            },
+        )
+        incomplete_point = client.post(
+            "/api/sign-tasks/123/submit",
+            json={
+                "source_page": 2,
+                "page_size": 10,
+                "location_mode": "manual_point",
+                "longitude": 119.123456,
+            },
         )
         monkeypatch.setattr(
             manual_sign,
@@ -234,6 +350,26 @@ def test_sign_task_detail_submit_and_busy_api_mapping(db_session: Session, monke
     assert submitted.status_code == 200
     assert submitted.json()["id"] == 33
     assert submitted.json()["trigger"] == "manual"
+    assert manual_point.status_code == 200
+    assert incomplete_point.status_code == 422
+    assert submissions == [
+        {
+            "task_id": 123,
+            "source_page": 2,
+            "page_size": 10,
+            "user_id": "test-user",
+            "jitter_override": None,
+            "coordinate_override": None,
+        },
+        {
+            "task_id": 123,
+            "source_page": 3,
+            "page_size": 15,
+            "user_id": "test-user",
+            "jitter_override": None,
+            "coordinate_override": (119.123456, 26.654321),
+        },
+    ]
     assert busy.status_code == 409
     assert busy.json()["detail"]["code"] == "WORKER_BUSY"
 

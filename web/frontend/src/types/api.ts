@@ -176,6 +176,12 @@ export interface MapConfig {
 export interface SignTaskDetails {
   task_id: number; position_id: number; base_lng: number; base_lat: number; position_name: string;
 }
+export interface ManualSignOptions {
+  location_mode: 'rule_jitter' | 'manual_point';
+  jitter?: number;
+  longitude?: number;
+  latitude?: number;
+}
 export interface LogEntry {
   id?: string | number; timestamp: string; level: LogLevel | string; logger?: string; message: string;
 }

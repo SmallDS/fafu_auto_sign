@@ -221,6 +221,25 @@ def test_execute_task_once_preserves_detail_upload_sign_order() -> None:
     task_service.get_task_details_strict.assert_called_once_with(123)
 
 
+def test_execute_task_once_uses_manual_coordinates_and_keeps_task_position_id() -> None:
+    details = TaskDetails(123, 456, 118.0, 25.0, "测试位置")
+    executor, _, _, _, sign_service = create_executor(task_ids=[], details=details)
+
+    summary = executor.execute_task_once(
+        "123",
+        coordinate_override=(119.123456, 26.654321),
+    )
+
+    assert summary.status == "success"
+    sign_service.submit_sign.assert_called_once_with(
+        task_id=123,
+        position_id=456,
+        base_lng=119.123456,
+        base_lat=26.654321,
+        image_url="http://qiniu.example/image.jpg",
+    )
+
+
 def test_execute_task_once_propagates_strict_details_fetch_error() -> None:
     executor, _, task_service, upload_service, sign_service = create_executor(task_ids=[])
     task_service.get_task_details_strict.side_effect = TaskDetailsFetchError("任务详情请求失败")

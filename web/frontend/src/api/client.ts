@@ -1,7 +1,7 @@
 import type {
   ActionResponse, AdminUser, AuditLog, AuthUser, BootstrapStatus, BootstrapSystemInput,
   ApiErrorDetail, ImageCategory, ImageRecord, LogsResponse, MapConfig, PageResponse,
-  Pairing, RunRecord, RunResult, RunTrigger, Settings, SettingsUpdate, SignTaskDetails,
+  ManualSignOptions, Pairing, RunRecord, RunResult, RunTrigger, Settings, SettingsUpdate, SignTaskDetails,
   SignTaskPage, StatusResponse, SystemSettings, SystemSettingsUpdate, UserSession,
   UserStatus,
 } from '../types/api';
@@ -110,9 +110,15 @@ export const api = {
     request(`/sign-tasks${buildQuery({ page, page_size: pageSize })}`),
   getSignTask: (id: string): Promise<SignTaskDetails> =>
     request(`/sign-tasks/${encodeURIComponent(id)}`),
-  submitSignTask: (id: string, sourcePage: number, pageSize: number): Promise<RunRecord> =>
+  submitSignTask: (
+    id: string,
+    sourcePage: number,
+    pageSize: number,
+    options: ManualSignOptions = { location_mode: 'rule_jitter' },
+  ): Promise<RunRecord> =>
     request(`/sign-tasks/${encodeURIComponent(id)}/submit`, {
-      method: 'POST', body: JSON.stringify({ source_page: sourcePage, page_size: pageSize }),
+      method: 'POST',
+      body: JSON.stringify({ source_page: sourcePage, page_size: pageSize, ...options }),
     }),
   listImages: (page = 1, pageSize = 24, category?: ImageCategory): Promise<PageResponse<ImageRecord>> =>
     request(`/images${buildQuery({ page, page_size: pageSize, category })}`),

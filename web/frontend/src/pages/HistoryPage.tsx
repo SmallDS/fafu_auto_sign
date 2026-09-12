@@ -19,6 +19,7 @@ import dayjs from 'dayjs';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { PageHeading } from '../components/PageHeading';
+import { PageSkeleton } from '../components/PageSkeleton';
 import { RunResultTag } from '../components/StatusTag';
 import type { RunRecord, RunResult, RunTaskDetail, RunTrigger } from '../types/api';
 
@@ -85,6 +86,8 @@ export function HistoryPage(): ReactNode {
     { title: '摘要', dataIndex: 'summary', ellipsis: true, render: (value: string | null) => value || '—' },
     { title: '', key: 'action', fixed: 'right', width: 70, render: (_, record) => <Button type="text" icon={<EyeOutlined />} aria-label={`查看记录 ${record.id}`} onClick={() => void openDetail(record)} /> },
   ];
+
+  if (loading && runs.length === 0) return <div className="page-container"><PageSkeleton variant="list" /></div>;
 
   return (
     <div className="page-container">

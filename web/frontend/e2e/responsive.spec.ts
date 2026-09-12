@@ -119,7 +119,7 @@ for (const viewport of cases) {
 
     for (const [path, heading] of [
       ['/dashboard', '运行概览'],
-      ['/settings', '签到设置'],
+      ['/settings', '规则签到'],
       ['/sign-tasks', '签到任务'],
       ['/images', '图片管理'],
       ['/history', '运行历史'],
@@ -205,7 +205,7 @@ test.describe('管理员页面统一布局', () => {
         ['/admin/users', '用户管理'],
         ['/admin/system', '系统设置'],
         ['/admin/audit', '审计日志'],
-        ['/settings', '签到设置'],
+        ['/settings', '规则签到'],
         ['/profile', '个人中心'],
       ] as const) {
         await page.goto(path);

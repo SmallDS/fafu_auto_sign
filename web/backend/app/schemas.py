@@ -363,6 +363,23 @@ class SignTaskDetailsRead(BaseModel):
 class SignTaskSubmit(BaseModel):
     source_page: int = Field(ge=1)
     page_size: int = Field(ge=1, le=100)
+    location_mode: Literal["rule_jitter", "manual_point"] = "rule_jitter"
+    jitter: float | None = Field(default=None, ge=0, le=0.001)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+
+    @model_validator(mode="after")
+    def validate_location_options(self) -> "SignTaskSubmit":
+        has_longitude = self.longitude is not None
+        has_latitude = self.latitude is not None
+        if self.location_mode == "manual_point":
+            if not (has_longitude and has_latitude):
+                raise ValueError("手动选点必须同时提供经度和纬度")
+            if self.jitter is not None:
+                raise ValueError("手动选点不能同时设置 GPS 偏移")
+        elif has_longitude or has_latitude:
+            raise ValueError("规则偏移模式不能提供手动选点坐标")
+        return self
 
 
 class WorkerActionResponse(BaseModel):

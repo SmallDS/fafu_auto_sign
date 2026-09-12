@@ -5,6 +5,7 @@ import {
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { PageHeading } from '../components/PageHeading';
+import { PageSkeleton } from '../components/PageSkeleton';
 import type {
   AdminUser, AuditLog, ImageRecord, RunRecord, Settings, UserSession, UserStatus,
 } from '../types/api';
@@ -123,6 +124,7 @@ export function AdminUsersPage(): ReactNode {
   };
 
   const action = (user: AdminUser) => <Button onClick={() => void open(user)}>管理</Button>;
+  if (loading && items.length === 0) return <div className="page-container"><PageSkeleton variant="list" /></div>;
   return (
     <div className="page-container">
       <PageHeading title="用户管理" description="审核用户，管理角色、完整签到配置、设备与运行记录。" />

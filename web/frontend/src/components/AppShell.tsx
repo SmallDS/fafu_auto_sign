@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext';
 const { Header, Sider, Content } = Layout;
 const userItems = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '概览' },
-  { key: '/settings', icon: <SettingOutlined />, label: '签到设置' },
+  { key: '/settings', icon: <SettingOutlined />, label: '规则签到' },
   { key: '/sign-tasks', icon: <UnorderedListOutlined />, label: '签到任务' },
   { key: '/images', icon: <PictureOutlined />, label: '图片' },
   { key: '/history', icon: <HistoryOutlined />, label: '历史' },

@@ -2,10 +2,14 @@ import { Card, Col, Row, Statistic, Typography } from 'antd';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api/client';
 import { PageHeading } from '../components/PageHeading';
+import { PageSkeleton } from '../components/PageSkeleton';
 
 export function AdminDashboardPage(): ReactNode {
   const [stats, setStats] = useState({ users: 0, pending: 0, active: 0, queued_jobs: 0 });
-  useEffect(() => { void api.getAdminStats().then(setStats); }, []);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { void api.getAdminStats().then(setStats).finally(() => setLoading(false)); }, []);
+
+  if (loading) return <div className="page-container"><PageSkeleton variant="dashboard" /></div>;
 
   return (
     <div className="page-container">

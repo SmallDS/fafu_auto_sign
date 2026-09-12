@@ -39,17 +39,25 @@ describe('SettingsPage multi-user settings', () => {
     mockedApi.updateSettings.mockResolvedValue(settings);
   });
 
-  it('只展示当前用户的 FAFU 配置', async () => {
+  it('首次加载时显示页面骨架', () => {
+    mockedApi.getSettings.mockReturnValue(new Promise(() => undefined));
     render(<ConfigProvider><AntApp><SettingsPage /></AntApp></ConfigProvider>);
-    expect(await screen.findByText('FAFU 账号')).toBeInTheDocument();
-    expect(screen.getByText('微信结果通知')).toBeInTheDocument();
-    expect(screen.queryByText('AppSecret')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('页面加载中')).toHaveAttribute('aria-busy', 'true');
+  });
+
+  it('只展示自动签到规则，不再展示账号与运行偏好', async () => {
+    render(<ConfigProvider><AntApp><SettingsPage /></AntApp></ConfigProvider>);
+    expect(await screen.findByRole('heading', { name: '规则签到' })).toBeInTheDocument();
+    expect(screen.getByText('自动签到规则')).toBeInTheDocument();
+    expect(screen.queryByText('FAFU 账号')).not.toBeInTheDocument();
+    expect(screen.queryByText('自动检查')).not.toBeInTheDocument();
+    expect(screen.queryByText('微信结果通知')).not.toBeInTheDocument();
   });
 
   it('允许留空任务关键词并保存空列表', async () => {
     render(<ConfigProvider><AntApp><SettingsPage /></AntApp></ConfigProvider>);
-    await screen.findByText('签到规则');
-    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await screen.findByText('自动签到规则');
+    fireEvent.click(screen.getByRole('button', { name: '保存规则' }));
     await waitFor(() => {
       expect(mockedApi.updateSettings).toHaveBeenCalledWith(
         expect.objectContaining({ task_keywords: [] }),

@@ -157,6 +157,44 @@ select {
   width: 100%;
 }
 
+.page-skeleton-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.page-skeleton-title.ant-skeleton-input {
+  width: min(260px, 58vw);
+}
+
+.page-skeleton-description.ant-skeleton-input {
+  width: min(430px, 82vw);
+}
+
+.page-skeleton-card {
+  min-height: 176px;
+}
+
+.page-skeleton-image-card {
+  height: 100%;
+}
+
+.page-skeleton-image-card .ant-card-body {
+  padding: 10px;
+}
+
+.page-skeleton-image-card .ant-skeleton-image,
+.page-skeleton-image-card .ant-skeleton-image-svg {
+  width: 100%;
+}
+
+.page-skeleton-image-card .ant-skeleton-image {
+  height: auto;
+  margin-bottom: 12px;
+  aspect-ratio: 4 / 3;
+}
+
 .content-card,
 .metric-card {
   border-color: #e4e7ec;
@@ -226,6 +264,11 @@ select {
 
 .upload-actions {
   margin-top: 16px;
+}
+
+.upload-button-group .ant-upload-wrapper,
+.upload-button-group .ant-upload-select {
+  display: block;
 }
 
 .image-list-heading {
@@ -472,6 +515,8 @@ select {
 
   .upload-actions > .ant-space,
   .upload-actions > .ant-space > .ant-space-item,
+  .upload-actions .ant-upload-wrapper,
+  .upload-actions .ant-upload-select,
   .upload-actions .ant-btn {
     width: 100%;
   }
@@ -765,6 +810,53 @@ select {
   overflow-wrap: anywhere;
 }
 
+.profile-setting-heading,
+.profile-setting-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.profile-setting-heading {
+  margin-bottom: 14px;
+}
+
+.profile-setting-heading > div,
+.profile-setting-row > div {
+  min-width: 0;
+}
+
+.profile-setting-row {
+  padding: 14px 0;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.profile-setting-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.profile-setting-description.ant-typography {
+  margin: 3px 0 0;
+}
+
+.profile-token-actions {
+  width: 100%;
+}
+
+.session-device-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  color: #0f766e;
+  background: #ecfdf3;
+  font-size: 18px;
+}
+
 .page-container .ant-table-wrapper,
 .page-container .ant-list,
 .page-container .ant-card {
@@ -795,6 +887,17 @@ select {
   .profile-summary {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .profile-setting-heading,
+  .profile-setting-row {
+    align-items: flex-start;
+  }
+
+  .profile-token-actions,
+  .profile-token-actions > .ant-space-item,
+  .profile-token-actions .ant-btn {
+    width: 100%;
   }
 
   .profile-refresh,
@@ -830,5 +933,80 @@ select {
   .sticky-save-bar .ant-space,
   .sticky-save-bar .ant-space-item {
     width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-skeleton .ant-skeleton-active .ant-skeleton-title::after,
+  .page-skeleton .ant-skeleton-active .ant-skeleton-paragraph > li::after,
+  .page-skeleton .ant-skeleton-active .ant-skeleton-avatar::after,
+  .page-skeleton .ant-skeleton-active .ant-skeleton-input::after,
+  .page-skeleton .ant-skeleton-active .ant-skeleton-image::after {
+    animation: none;
+  }
+}
+
+.page-skeleton-log-card {
+  min-height: 480px;
+  border-color: #344054;
+  background: #101828;
+}
+
+.page-skeleton-log-card .ant-skeleton-title,
+.page-skeleton-log-card .ant-skeleton-paragraph > li {
+  background: linear-gradient(90deg, #344054 25%, #475467 37%, #344054 63%);
+}
+
+.auth-bootstrap-loading {
+  padding: 20px;
+  background: #f5f7f8;
+}
+
+.manual-sign-options .responsive-radio-group {
+  margin-bottom: 18px;
+}
+
+.manual-sign-fields {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.manual-sign-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 0 4px;
+  background: rgb(255 255 255 / 96%);
+  backdrop-filter: blur(8px);
+}
+
+.amap-selected-location-dot {
+  width: 20px;
+  height: 20px;
+  border: 4px solid white;
+  border-radius: 50% 50% 50% 0;
+  background: #b42318;
+  box-shadow: 0 2px 8px rgb(16 24 40 / 28%);
+  transform: rotate(-45deg);
+}
+
+@media (max-width: 767px) {
+  .manual-sign-footer,
+  .manual-sign-footer .ant-btn {
+    width: 100%;
+  }
+
+  .manual-sign-footer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .page-skeleton-log-card {
+    min-height: 360px;
   }
 }

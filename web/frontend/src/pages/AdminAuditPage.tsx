@@ -2,6 +2,7 @@ import { App, Card, Empty, Grid, List, Table, Tag } from 'antd';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { PageHeading } from '../components/PageHeading';
+import { PageSkeleton } from '../components/PageSkeleton';
 import type { AuditLog } from '../types/api';
 
 export function AdminAuditPage(): ReactNode {
@@ -16,6 +17,8 @@ export function AdminAuditPage(): ReactNode {
       .catch((error) => message.error(getErrorMessage(error)))
       .finally(() => setLoading(false));
   }, [message]);
+
+  if (loading && items.length === 0) return <div className="page-container"><PageSkeleton variant="list" /></div>;
 
   return (
     <div className="page-container">

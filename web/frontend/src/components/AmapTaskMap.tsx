@@ -32,11 +32,17 @@ interface AmapGeocoderResult {
 
 interface AmapOverlay {}
 
+interface AmapMapClickEvent {
+  lnglat?: AmapLocation | Coordinate;
+}
+
 interface AmapMap {
   add: (overlays: AmapOverlay | AmapOverlay[]) => void;
   remove: (overlays: AmapOverlay | AmapOverlay[]) => void;
   destroy: () => void;
   resize?: () => void;
+  on?: (event: 'click', handler: (event: AmapMapClickEvent) => void) => void;
+  off?: (event: 'click', handler: (event: AmapMapClickEvent) => void) => void;
   setFitView?: (
     overlays?: AmapOverlay[],
     immediately?: boolean,
@@ -203,15 +209,25 @@ function geolocationErrorMessage(error: GeolocationPositionError): string {
 interface AmapTaskMapProps {
   details: SignTaskDetails;
   config: MapConfig;
+  jitterOverride?: number;
+  selectionEnabled?: boolean;
+  onSelectCoordinate?: (coordinate: Coordinate) => void;
 }
 
-export function AmapTaskMap({ details, config }: AmapTaskMapProps): ReactNode {
+export function AmapTaskMap({
+  details,
+  config,
+  jitterOverride,
+  selectionEnabled = false,
+  onSelectCoordinate,
+}: AmapTaskMapProps): ReactNode {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<AmapMap | null>(null);
   const amapRef = useRef<AmapNamespace | null>(null);
   const taskCoordinateRef = useRef<Coordinate | null>(null);
   const taskMarkerRef = useRef<AmapOverlay | null>(null);
   const userOverlaysRef = useRef<AmapOverlay[]>([]);
+  const selectionOverlayRef = useRef<AmapOverlay | null>(null);
   const [ready, setReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [address, setAddress] = useState<string | null>(null);
@@ -219,12 +235,14 @@ export function AmapTaskMap({ details, config }: AmapTaskMapProps): ReactNode {
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
+  const displayJitter = jitterOverride ?? config.jitter;
 
   useEffect(() => {
     if (!config.enabled || !config.js_key || !containerRef.current) return;
     let cancelled = false;
     let map: AmapMap | null = null;
     let resizeTimer: number | null = null;
+    let mapClickHandler: ((event: AmapMapClickEvent) => void) | null = null;
     setReady(false);
     setMapError(null);
     setAddress(null);
@@ -236,12 +254,12 @@ export function AmapTaskMap({ details, config }: AmapTaskMapProps): ReactNode {
       try {
         const amap = await loadAmap(config);
         const rawTask: Coordinate = [details.base_lng, details.base_lat];
-        const rawBounds: Coordinate[] = config.jitter > 0
+        const rawBounds: Coordinate[] = displayJitter > 0
           ? [
-              [details.base_lng - config.jitter, details.base_lat - config.jitter],
-              [details.base_lng + config.jitter, details.base_lat - config.jitter],
-              [details.base_lng + config.jitter, details.base_lat + config.jitter],
-              [details.base_lng - config.jitter, details.base_lat + config.jitter],
+              [details.base_lng - displayJitter, details.base_lat - displayJitter],
+              [details.base_lng + displayJitter, details.base_lat - displayJitter],
+              [details.base_lng + displayJitter, details.base_lat + displayJitter],
+              [details.base_lng - displayJitter, details.base_lat + displayJitter],
             ]
           : [];
         const taskCoordinate = rawTask;
@@ -271,6 +289,23 @@ export function AmapTaskMap({ details, config }: AmapTaskMapProps): ReactNode {
           }));
         }
         map.add(overlays);
+        if (selectionEnabled && map.on) {
+          mapClickHandler = (event) => {
+            const coordinate = toCoordinate(event.lnglat);
+            if (!coordinate) return;
+            if (selectionOverlayRef.current) map?.remove(selectionOverlayRef.current);
+            const selectedMarker = new amap.Marker({
+              position: coordinate,
+              title: '本次手动签到点',
+              content: '<div class="amap-selected-location-dot" aria-label="本次手动签到点"></div>',
+              anchor: 'center',
+            });
+            selectionOverlayRef.current = selectedMarker;
+            map?.add(selectedMarker);
+            onSelectCoordinate?.(coordinate);
+          };
+          map.on('click', mapClickHandler);
+        }
         amapRef.current = amap;
         mapRef.current = map;
         taskCoordinateRef.current = taskCoordinate;
@@ -300,7 +335,9 @@ export function AmapTaskMap({ details, config }: AmapTaskMapProps): ReactNode {
     return () => {
       cancelled = true;
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      if (mapClickHandler && map?.off) map.off('click', mapClickHandler);
       userOverlaysRef.current = [];
+      selectionOverlayRef.current = null;
       taskMarkerRef.current = null;
       taskCoordinateRef.current = null;
       amapRef.current = null;
@@ -309,13 +346,15 @@ export function AmapTaskMap({ details, config }: AmapTaskMapProps): ReactNode {
     };
   }, [
     config.enabled,
-    config.jitter,
+    displayJitter,
     config.js_key,
     config.service_host,
     details.base_lat,
     details.base_lng,
     details.position_name,
     details.task_id,
+    onSelectCoordinate,
+    selectionEnabled,
   ]);
 
   const locate = (): void => {
@@ -389,14 +428,17 @@ export function AmapTaskMap({ details, config }: AmapTaskMapProps): ReactNode {
   }
 
   return (
-    <Space direction="vertical" size={12} className="full-width amap-task-map">
+    <Space orientation="vertical" size={12} className="full-width amap-task-map">
       {mapError ? (
-        <Alert type="warning" showIcon message="地图暂不可用" description={mapError} />
+        <Alert type="warning" showIcon title="地图暂不可用" description={mapError} />
       ) : (
         <div className="amap-map-frame">
           <div ref={containerRef} className="amap-map-container" aria-label="签到位置地图" />
           {!ready && <div className="amap-map-loading"><Spin tip="正在加载地图" /></div>}
         </div>
+      )}
+      {selectionEnabled && !mapError && (
+        <Typography.Text type="secondary">点击地图可选择本次签到位置，坐标按 GCJ-02 使用。</Typography.Text>
       )}
       {address && (
         <Typography.Text>
@@ -425,8 +467,8 @@ export function AmapTaskMap({ details, config }: AmapTaskMapProps): ReactNode {
           当前页面无法使用浏览器定位；请通过 HTTPS 或 localhost 访问后获取距离。
         </Typography.Text>
       )}
-      {locationError && <Alert type="warning" showIcon message={locationError} />}
-      {config.jitter > 0 && !mapError && (
+      {locationError && <Alert type="warning" showIcon title={locationError} />}
+      {displayJitter > 0 && !mapError && (
         <Typography.Text type="secondary">
           橙色区域为当前 GPS 随机偏移范围，仅用于展示，不会改变 FAFU 返回的基准位置。
         </Typography.Text>

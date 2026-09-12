@@ -378,12 +378,19 @@ def submit_sign_task(
     session: DbSession,
 ) -> RunRead:
     try:
+        coordinate_override = (
+            (payload.longitude, payload.latitude)
+            if payload.longitude is not None and payload.latitude is not None
+            else None
+        )
         row = manual_sign.submit(
             session,
             task_id,
             payload.source_page,
             payload.page_size,
             user_id=user.id,
+            jitter_override=payload.jitter,
+            coordinate_override=coordinate_override,
         )
     except ConfigurationIncomplete as exc:
         raise api_error(409, "CONFIGURATION_INCOMPLETE", "完整签到配置尚未就绪") from exc

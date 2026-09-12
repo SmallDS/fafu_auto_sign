@@ -170,11 +170,21 @@ class ManualSignService:
         source_page: int,
         page_size: int,
         user_id: str | None = None,
+        *,
+        jitter_override: float | None = None,
+        coordinate_override: tuple[float, float] | None = None,
     ) -> RunHistory:
+        if jitter_override is not None and coordinate_override is not None:
+            raise ValueError("不能同时设置 GPS 偏移和手动选点")
+
         settings = _user_settings(session, user_id)
         user = session.get(User, user_id) if user_id else None
         system = get_or_create_system_settings(session) if user else None
         config = build_app_config(session, settings, system, user)
+        if jitter_override is not None:
+            config = config.model_copy(update={"jitter": jitter_override})
+        elif coordinate_override is not None:
+            config = config.model_copy(update={"jitter": 0.0})
         version = settings.config_version
         started_at = datetime.now(timezone.utc)
         self._acquire_slot(user_id)
@@ -193,6 +203,7 @@ class ManualSignService:
                             trigger="manual",
                             config_version=version,
                             capture_fatal=True,
+                            coordinate_override=coordinate_override,
                         )
             except SystemExit as exc:
                 error = safe_exception_message(exc)

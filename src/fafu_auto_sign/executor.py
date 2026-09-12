@@ -126,6 +126,7 @@ class SignExecutor:
         task_id: str,
         should_stop: Callable[[], bool] | None = None,
         strict_details: bool = False,
+        coordinate_override: tuple[float, float] | None = None,
     ) -> tuple[TaskRunResult | None, bool]:
         """执行共享的“详情→上传→签到”单任务调用链。"""
         task_started_at = _utc_now()
@@ -171,11 +172,16 @@ class SignExecutor:
                     False,
                 )
 
+            base_lng, base_lat = (
+                coordinate_override
+                if coordinate_override is not None
+                else (task_details.base_lng, task_details.base_lat)
+            )
             success = self.sign_service.submit_sign(
                 task_id=int(task_id),
                 position_id=task_details.position_id,
-                base_lng=task_details.base_lng,
-                base_lat=task_details.base_lat,
+                base_lng=base_lng,
+                base_lat=base_lat,
                 image_url=image_url,
             )
             result_error: str | None
@@ -224,13 +230,18 @@ class SignExecutor:
         trigger: str = "manual",
         config_version: int = 0,
         capture_fatal: bool = False,
+        coordinate_override: tuple[float, float] | None = None,
     ) -> RunSummary:
         """处理指定任务一次，不重新扫描任务列表。"""
         if self._closed:
             raise RuntimeError("SignExecutor 已关闭，不能继续执行")
         started_at = _utc_now()
         try:
-            result, _ = self._process_task(str(task_id), strict_details=True)
+            result, _ = self._process_task(
+                str(task_id),
+                strict_details=True,
+                coordinate_override=coordinate_override,
+            )
             task_results = (result,) if result is not None else ()
             result_list = list(task_results)
             return RunSummary(
