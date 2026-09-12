@@ -248,7 +248,11 @@ def test_menu_sync_builds_https_view_button(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert captured["url"] == MENU_CREATE_URL
     assert captured["params"] == {"access_token": "token"}
-    assert captured["json"] == {
+    assert captured["headers"] == {"Content-Type": "application/json; charset=utf-8"}
+    body = captured["data"]
+    assert isinstance(body, bytes)
+    assert b"\\u" not in body
+    assert json.loads(body.decode("utf-8")) == {
         "button": [
             {
                 "type": "view",

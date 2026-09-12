@@ -20,6 +20,7 @@ WECHAT_ERROR_MESSAGES = {
     "40013": "AppID 无效",
     "40016": "菜单按钮数量或结构不符合要求",
     "40018": "菜单名称长度不符合要求",
+    "40033": "请求体包含微信不接受的 \\uXXXX 转义字符",
     "40125": "AppSecret 无效",
     "40164": "服务器出口 IP 未加入微信接口 IP 白名单",
     "42001": "access token 已过期，请重试",
@@ -140,11 +141,14 @@ def sync_menu(
         f"{public_base_url.rstrip('/')}/auth/wechat/start?"
         + urlencode({"next": "/dashboard"})
     )
+    menu = {"button": [{"type": "view", "name": menu_name, "url": target}]}
+    body = json.dumps(menu, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     try:
         response = requests.post(
             MENU_CREATE_URL,
             params={"access_token": token},
-            json={"button": [{"type": "view", "name": menu_name, "url": target}]},
+            data=body,
+            headers={"Content-Type": "application/json; charset=utf-8"},
             timeout=TIMEOUT,
         )
     except requests.RequestException as exc:
