@@ -35,20 +35,30 @@ def random_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def set_session_cookie(response: Response, raw_token: str) -> None:
+def cookie_secure(request: Request | None) -> bool:
+    """Keep HTTPS cookies Secure while allowing an explicit HTTP LAN entry."""
+    if request is None:
+        return True
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    return request.url.scheme == "https" or forwarded_proto == "https"
+
+
+def set_session_cookie(response: Response, raw_token: str, *, request: Request | None = None) -> None:
     response.set_cookie(
         SESSION_COOKIE,
         raw_token,
         max_age=SESSION_DAYS * 86400,
         httponly=True,
-        secure=True,
+        secure=cookie_secure(request),
         samesite="lax",
         path="/",
     )
 
 
-def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE, path="/", secure=True, samesite="lax")
+def clear_session_cookie(response: Response, *, request: Request | None = None) -> None:
+    response.delete_cookie(
+        SESSION_COOKIE, path="/", secure=cookie_secure(request), samesite="lax"
+    )
 
 
 def create_user_session(

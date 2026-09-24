@@ -10,7 +10,7 @@ FastAPI、全局签到队列和 Ant Design 前端运行在同一个容器中。�
 - 已备案并能访问本服务的公网 HTTPS 地址
 - 在测试号“网页授权获取用户基本信息”中只填写公网域名（例如 `sign.example.com`），不要填写协议、端口或 `/auth/wechat/callback` 路径
 - 可选的高德 Web JS Key 与 Security JS Code
-- 反向代理或负载均衡器负责 HTTPS 终止；应用容器内部仍监听 8000 端口
+- 反向代理或负载均衡器负责 HTTPS 终止，并向应用传递 `X-Forwarded-Proto: https`；应用容器内部仍监听 8000 端口
 
 AppSecret、FAFU Token、CAS 密码、WeLink 刷新令牌和高德 Security JS Code 以明文保存在 SQLite 中，读取接口只返回掩码。请保护 `/data` 备份和服务器权限。
 
@@ -43,6 +43,8 @@ docker compose -f web/docker-compose.yml up -d --build
 - Cookie 使用 HttpOnly、Secure、SameSite=Lax；写请求同时校验 CSRF Token。
 
 电脑二维码采用“扫码即登录”，不会在手机端二次确认。请只扫描自己主动打开的登录二维码，并通过个人中心检查和撤销陌生设备。
+
+电脑端也可通过局域网 HTTP 地址打开登录或初始化页面；扫码仍跳转到系统配置的公网 HTTPS 微信授权地址，电脑在当前访问地址换取自己的 Session。HTTP 地址上的配对和 Session Cookie 不带 `Secure`，会在局域网内明文传输；请只在受控网络使用并限制 8000 端口的访问范围。HTTPS 入口的 Cookie 仍保持 `Secure`。
 
 ## 管理员功能
 

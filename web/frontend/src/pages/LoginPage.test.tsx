@@ -48,4 +48,18 @@ describe('LoginPage', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(container.querySelector('svg[height="220"]')).toBeInTheDocument();
   });
+
+  it('当前页面与微信 OAuth 域名不同时仍显示二维码并轮询', async () => {
+    mockedApi.createLoginPairing.mockResolvedValue({
+      ...initialPairing,
+      auth_url: 'https://public.example.com/auth/wechat/start?pairing_id=pairing-1&claim=test',
+    });
+    const { container } = render(
+      <ConfigProvider><AntApp><LoginPage /></AntApp></ConfigProvider>,
+    );
+
+    await waitFor(() => expect(container.querySelector('svg[height="220"]')).toBeInTheDocument());
+    await waitFor(() => expect(mockedApi.getLoginPairing).toHaveBeenCalled(), { timeout: 2500 });
+    expect(container.textContent).not.toContain('Session Cookie 只会在系统配置的公网 HTTPS 地址生效');
+  });
 });

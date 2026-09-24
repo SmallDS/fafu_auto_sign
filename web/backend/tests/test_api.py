@@ -4,6 +4,7 @@ import base64
 import io
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image as PillowImage
 from sqlalchemy import delete
@@ -78,6 +79,74 @@ def test_health_is_public_and_business_api_requires_session() -> None:
         protected = client.get("/api/settings")
         assert protected.status_code == 401
         assert protected.json()["detail"]["code"] == "AUTH_REQUIRED"
+
+
+@pytest.mark.parametrize("scheme, secure_cookie", [("http", False), ("https", True)])
+def test_pairing_login_works_on_current_origin_regardless_of_oauth_domain(
+    scheme: str, secure_cookie: bool,
+) -> None:
+    with TestClient(app, base_url=f"{scheme}://testserver") as client:
+        reset_database()
+        with SessionLocal() as session:
+            system = get_or_create_system_settings(session)
+            system.setup_state = "initialized"
+            system.public_base_url = "https://public.example.com"
+            system.wechat_app_id = "wx-test"
+            system.wechat_app_secret = "test-secret"
+            user = User(
+                id=str(uuid.uuid4()), openid="openid-" + uuid.uuid4().hex,
+                nickname="测试用户", role="user", status="active",
+            )
+            session.add(user)
+            session.commit()
+            user_id = user.id
+
+        created = client.post("/api/auth/pairings")
+        assert created.status_code == 200
+        assert created.json()["auth_url"].startswith("https://public.example.com/")
+        assert ("secure" in created.headers["set-cookie"].lower()) is secure_cookie
+        pairing_id = created.json()["id"]
+        assert client.get(f"/api/auth/pairings/{pairing_id}").status_code == 200
+        with SessionLocal() as session:
+            pairing = session.get(LoginPairing, pairing_id)
+            pairing.user_id = user_id
+            pairing.status = "ready"
+            session.commit()
+
+        exchanged = client.post(f"/api/auth/pairings/{pairing_id}/exchange")
+        assert exchanged.status_code == 200
+        session_cookie = next(
+            item for item in exchanged.headers.get_list("set-cookie")
+            if item.startswith(SESSION_COOKIE + "=")
+        )
+        assert ("secure" in session_cookie.lower()) is secure_cookie
+        assert "httponly" in session_cookie.lower()
+        assert "samesite=lax" in session_cookie.lower()
+        assert client.get("/api/auth/me").status_code == 200
+        logged_out = client.post(
+            "/api/auth/logout",
+            headers={"X-CSRF-Token": exchanged.json()["csrf_token"]},
+        )
+        assert logged_out.status_code == 204
+        assert ("secure" in logged_out.headers["set-cookie"].lower()) is secure_cookie
+        assert client.get("/api/auth/me").status_code == 401
+
+
+def test_https_forwarded_by_reverse_proxy_keeps_secure_cookie() -> None:
+    with TestClient(app, base_url="http://testserver") as client:
+        reset_database()
+        with SessionLocal() as session:
+            system = get_or_create_system_settings(session)
+            system.setup_state = "initialized"
+            system.public_base_url = "https://public.example.com"
+            system.wechat_app_id = "wx-test"
+            system.wechat_app_secret = "test-secret"
+            session.commit()
+        created = client.post(
+            "/api/auth/pairings", headers={"X-Forwarded-Proto": "https"}
+        )
+        assert created.status_code == 200
+        assert "secure" in created.headers["set-cookie"].lower()
 
 
 def test_authenticated_settings_csrf_and_user_image_upload() -> None:

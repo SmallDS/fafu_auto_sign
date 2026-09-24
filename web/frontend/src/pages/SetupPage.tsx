@@ -1,6 +1,6 @@
 import { Alert, App, Button, Card, Form, Input, Select, Steps, Switch, Typography } from 'antd';
 import { QRCodeSVG } from 'qrcode.react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { BootstrapSystemInput, Pairing } from '../types/api';
@@ -22,15 +22,6 @@ export function SetupPage(): ReactNode {
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [form] = Form.useForm<BootstrapSystemInput>();
   const configured = !(bootstrap?.requires_system_configuration ?? true);
-  const expectedOrigin = useMemo(() => {
-    if (!pairing?.auth_url) return null;
-    try {
-      return new URL(pairing.auth_url).origin;
-    } catch {
-      return null;
-    }
-  }, [pairing?.auth_url]);
-  const originMismatch = Boolean(expectedOrigin && expectedOrigin !== window.location.origin);
 
   const createPairing = async () => {
     try {
@@ -46,7 +37,7 @@ export function SetupPage(): ReactNode {
   }, [configured]);
 
   useEffect(() => {
-    if (!pairing || originMismatch || ['consumed', 'expired'].includes(pairing.status)) return;
+    if (!pairing || ['consumed', 'expired'].includes(pairing.status)) return;
     const timer = window.setInterval(async () => {
       try {
         const current = await api.getAdminPairing(pairing.id);
@@ -61,7 +52,7 @@ export function SetupPage(): ReactNode {
       }
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [acceptUser, originMismatch, pairing?.id, pairing?.status]);
+  }, [acceptUser, pairing?.id, pairing?.status]);
 
   const submit = async (values: BootstrapSystemInput) => {
     setSaving(true);
@@ -152,16 +143,7 @@ export function SetupPage(): ReactNode {
             <Typography.Paragraph type="secondary">
               扫码后将获取微信昵称与头像；资料缺失时会在手机上提示补充。
             </Typography.Paragraph>
-            {originMismatch && expectedOrigin ? (
-              <Alert
-                type="warning"
-                showIcon
-                message="请从公网 HTTPS 地址继续初始化"
-                description="当前页面无法保存 Secure 登录 Cookie。"
-                action={<Button href={`${expectedOrigin}/setup`}>打开正确地址</Button>}
-              />
-            ) : null}
-            {!originMismatch && pairing?.auth_url && pairing.status === 'pending' ? (
+            {pairing?.auth_url && pairing.status === 'pending' ? (
               <QRCodeSVG value={pairing.auth_url} size={220} level="M" />
             ) : null}
             <Typography.Text type="secondary">

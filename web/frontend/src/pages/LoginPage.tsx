@@ -1,6 +1,6 @@
 import { Alert, Button, Card, Space, Typography } from 'antd';
 import { QRCodeSVG } from 'qrcode.react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { api, getErrorMessage } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { Pairing } from '../types/api';
@@ -32,15 +32,6 @@ export function LoginPage(): ReactNode {
     return oauthErrors[code] ?? null;
   });
 
-  const expectedOrigin = useMemo(() => {
-    if (!pairing?.auth_url) return null;
-    try {
-      return new URL(pairing.auth_url).origin;
-    } catch {
-      return null;
-    }
-  }, [pairing?.auth_url]);
-  const originMismatch = Boolean(expectedOrigin && expectedOrigin !== window.location.origin);
   const remaining = pairing
     ? Math.max(0, Math.ceil((new Date(pairing.expires_at).getTime() - now) / 1000))
     : 0;
@@ -59,7 +50,7 @@ export function LoginPage(): ReactNode {
     return () => window.clearInterval(timer);
   }, []);
   useEffect(() => {
-    if (!pairing || originMismatch || ['expired', 'consumed', 'rejected', 'disabled'].includes(pairing.status)) return;
+    if (!pairing || ['expired', 'consumed', 'rejected', 'disabled'].includes(pairing.status)) return;
     const timer = window.setInterval(async () => {
       try {
         const current = await api.getLoginPairing(pairing.id);
@@ -74,23 +65,14 @@ export function LoginPage(): ReactNode {
       }
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [acceptUser, originMismatch, pairing?.id, pairing?.status]);
+  }, [acceptUser, pairing?.id, pairing?.status]);
 
   return (
     <main className="auth-page">
       <Card className="auth-card qr-stage">
         <Typography.Title level={2}>微信扫码登录</Typography.Title>
         <Typography.Paragraph type="secondary">请使用已绑定本系统的微信扫码。</Typography.Paragraph>
-        {originMismatch && expectedOrigin ? (
-          <Alert
-            type="warning"
-            showIcon
-            message="当前地址无法完成登录"
-            description="Session Cookie 只会在系统配置的公网 HTTPS 地址生效。"
-            action={<Button href={`${expectedOrigin}/login`}>打开正确地址</Button>}
-          />
-        ) : null}
-        {!originMismatch && pairing?.auth_url && pairing.status === 'pending' ? (
+        {pairing?.auth_url && pairing.status === 'pending' ? (
           <QRCodeSVG value={pairing.auth_url} size={220} level="M" />
         ) : null}
         <Space orientation="vertical" size={2}>

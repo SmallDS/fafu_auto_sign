@@ -18,6 +18,7 @@ from app.auth import (
     CurrentUser,
     as_utc,
     PAIRING_COOKIE,
+    cookie_secure,
     clear_session_cookie,
     create_user_session,
     hash_token,
@@ -169,7 +170,8 @@ def bootstrap_system(payload: BootstrapSystemRequest, session: DbSession) -> Boo
 
 
 def create_pairing(
-    session: Session, response: Response, *, kind: str, ttl_seconds: int
+    session: Session, response: Response, *, kind: str, ttl_seconds: int,
+    request: Request | None = None,
 ) -> PairingRead:
     system = get_or_create_system_settings(session)
     _, _, public_base_url = require_oauth_settings(system)
@@ -196,7 +198,7 @@ def create_pairing(
         verifier,
         max_age=1800 if kind == "login" else ttl_seconds,
         httponly=True,
-        secure=True,
+        secure=cookie_secure(request),
         samesite="lax",
         path="/",
     )
@@ -208,13 +210,13 @@ def create_pairing(
 
 
 @router.post("/api/bootstrap/admin-pairings", response_model=PairingRead)
-def create_admin_pairing(response: Response, session: DbSession) -> PairingRead:
-    return create_pairing(session, response, kind="admin", ttl_seconds=300)
+def create_admin_pairing(request: Request, response: Response, session: DbSession) -> PairingRead:
+    return create_pairing(session, response, kind="admin", ttl_seconds=300, request=request)
 
 
 @router.post("/api/auth/pairings", response_model=PairingRead)
-def create_login_pairing(response: Response, session: DbSession) -> PairingRead:
-    return create_pairing(session, response, kind="login", ttl_seconds=60)
+def create_login_pairing(request: Request, response: Response, session: DbSession) -> PairingRead:
+    return create_pairing(session, response, kind="login", ttl_seconds=60, request=request)
 
 
 def load_pairing_for_browser(
@@ -299,8 +301,10 @@ def exchange_pairing(
     pairing.exchanged_at = utcnow()
     pairing.status = "consumed"
     session.commit()
-    set_session_cookie(response, raw)
-    response.delete_cookie(PAIRING_COOKIE, path="/", secure=True, samesite="lax")
+    set_session_cookie(response, raw, request=request)
+    response.delete_cookie(
+        PAIRING_COOKIE, path="/", secure=cookie_secure(request), samesite="lax"
+    )
     return auth_user_read(user, auth_session.csrf_token)
 
 
@@ -527,7 +531,7 @@ def wechat_callback(
     else:
         target = state_row.next_path
     response = RedirectResponse(target)
-    set_session_cookie(response, raw_session)
+    set_session_cookie(response, raw_session, request=request)
     return response
 
 
@@ -544,7 +548,7 @@ def logout(request: Request, response: Response, session: DbSession) -> None:
         auth_session.revoked_at = utcnow()
         session.commit()
     finally:
-        clear_session_cookie(response)
+        clear_session_cookie(response, request=request)
 
 
 @router.get("/api/auth/sessions", response_model=list[SessionRead])
@@ -591,7 +595,7 @@ def revoke_session(
     row.revoked_at = utcnow()
     session.commit()
     if row.id == request.state.auth_session.id:
-        clear_session_cookie(response)
+        clear_session_cookie(response, request=request)
 
 
 @router.get("/api/auth/avatar/{user_id}", response_class=FileResponse)
