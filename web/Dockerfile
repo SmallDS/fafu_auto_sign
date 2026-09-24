@@ -16,7 +16,7 @@ COPY src/ ./src/
 COPY web/backend/requirements.txt ./web/backend/requirements.txt
 RUN pip install --no-cache-dir . -r web/backend/requirements.txt \
     && apt-get update \
-    && apt-get install -y --no-install-recommends gosu \
+    && apt-get install -y --no-install-recommends gosu libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 fafu \
     && useradd --uid 10001 --gid fafu --no-create-home --shell /usr/sbin/nologin fafu

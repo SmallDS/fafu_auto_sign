@@ -17,6 +17,7 @@ from app.auth import AdminUser
 from app.auth_routes import avatar_url
 from app.database import get_db
 from app.errors import api_error
+from app.fafu_auth import fafu_auth
 from app.models import AuditLog, Image, RunHistory, SignJob, User, UserSession, utcnow
 from app.paths import user_root
 from app.repository import (
@@ -202,7 +203,10 @@ def put_user_settings(
 ) -> SettingsRead:
     if session.get(User, user_id) is None:
         raise api_error(404, "USER_NOT_FOUND", "用户不存在")
-    settings = update_settings(session, payload, user_id)
+    with fafu_auth.user_lock(user_id):
+        settings = update_settings(session, payload, user_id)
+        if payload.clear_user_token or payload.user_token:
+            fafu_auth.invalidate_user(user_id)
     audit(session, admin.id, "user.settings.update", target_user_id=user_id)
     return settings_to_read(session, settings)
 
@@ -388,6 +392,11 @@ def revoke_user_sessions(user_id: str, admin: AdminUser, session: DbSession) -> 
 
 @router.delete("/users/{user_id}", status_code=204)
 def delete_user(user_id: str, admin: AdminUser, session: DbSession) -> None:
+    with fafu_auth.user_lock(user_id):
+        _delete_user_locked(user_id, admin, session)
+
+
+def _delete_user_locked(user_id: str, admin: AdminUser, session: Session) -> None:
     target = session.get(User, user_id)
     if target is None:
         raise api_error(404, "USER_NOT_FOUND", "用户不存在")
@@ -403,6 +412,7 @@ def delete_user(user_id: str, admin: AdminUser, session: DbSession) -> None:
         SignJob.user_id == user_id, SignJob.status == "queued"
     ).update({"status": "cancelled"})
     session.delete(target)
+    fafu_auth.invalidate_user(user_id)
     audit(session, admin.id, "user.delete", target_user_id=user_id, commit=False)
     session.commit()
     try:

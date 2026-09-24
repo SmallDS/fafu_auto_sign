@@ -11,6 +11,7 @@ from sqlalchemy import delete
 import app.auth_routes as auth_routes
 from app.auth import SESSION_COOKIE, create_user_session
 from app.database import SessionLocal
+from app.fafu_auth import fafu_auth
 from app.main import app
 from app.models import (
     AuditLog,
@@ -107,6 +108,57 @@ def test_authenticated_settings_csrf_and_user_image_upload() -> None:
         with SessionLocal() as session:
             row = session.get(Image, image_id)
             assert row is not None and row.user_id == user.id
+
+
+def test_fafu_auth_api_requires_csrf_and_never_returns_credentials(monkeypatch) -> None:
+    class Transport:
+        def begin(self, username, password):
+            assert username == "20260001" and password == "cas-secret"
+            return "https://api.welink.huaweicloud.com/callback", "temporary-cookie"
+
+        def complete(self, service, cookie, code, device_id):
+            assert cookie == "temporary-cookie" and code == "123456"
+            assert device_id == "bound-device"
+            return "welink-secret", "refresh-secret", "2_auto-secret"
+
+        def validate_token(self, token):
+            return "valid"
+
+    monkeypatch.setattr(fafu_auth, "transport", Transport())
+    with TestClient(app, base_url="https://testserver") as client:
+        reset_database()
+        user, csrf = login_active_user(client)
+        credentials = {
+            "username": "20260001", "password": "cas-secret",
+            "device_id": "bound-device",
+        }
+        assert client.post("/api/fafu-auth/start", json=credentials).status_code == 403
+        started = client.post(
+            "/api/fafu-auth/start", headers={"X-CSRF-Token": csrf},
+            json=credentials,
+        )
+        assert started.status_code == 200
+        assert "cas-secret" not in started.text
+        attempt_id = started.json()["attempt_id"]
+        completed = client.post(
+            "/api/fafu-auth/complete", headers={"X-CSRF-Token": csrf},
+            json={"attempt_id": attempt_id, "code": "123456"},
+        )
+        assert completed.status_code == 200
+        assert completed.json()["fafu_auth_mode"] == "auto"
+        public = client.get("/api/settings")
+        assert public.status_code == 200
+        assert public.json()["fafu_auth_status"] == "connected"
+        for secret in ("cas-secret", "refresh-secret", "welink-secret", "2_auto-secret"):
+            assert secret not in public.text
+        manual = client.put(
+            "/api/settings", headers={"X-CSRF-Token": csrf},
+            json={"user_token": "2_manual-next"},
+        )
+        assert manual.status_code == 200
+        with SessionLocal() as session:
+            from app.models import FafuAuthSession
+            assert session.get(FafuAuthSession, user.id) is None
 
 
 def test_full_authorization_is_normalized_and_invalid_value_not_echoed() -> None:

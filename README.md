@@ -44,7 +44,7 @@ docker compose -f web/docker-compose.yml up -d --build
 
 部署公网 HTTPS 反向代理后访问管理台并完成“测试号设置 → 管理员扫码”初始化。AppSecret、FAFU Token 与高德 Security JS Code 以明文保存在 SQLite，API 仅返回掩码；部署、升级和微信回调配置见 [web/README.md](web/README.md)。
 
-Web 可选接入高德地图，在签到任务详情中展示位置、逆地理地址、GPS 随机偏移范围及当前位置距离。地图坐标转换仅用于显示，FAFU 的原始明文 HTTP 请求和签到坐标不会改变。
+Web 的个人中心可选择手动输入 `2_` Token，或通过 FAFU 账号、已绑定设备 ID 和短信验证码连接并自动续期；CAS 密码及 WeLink 刷新令牌同样以明文存储在 `/data/app.db`。Web 可选接入高德地图，在签到任务详情中展示位置、逆地理地址、GPS 随机偏移范围及当前位置距离。地图坐标转换仅用于显示，FAFU 的原始明文 HTTP 请求和签到坐标不会改变。
 
 #### 1. 环境准备
 

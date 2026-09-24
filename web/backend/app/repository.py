@@ -11,7 +11,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.errors import redact_sensitive_payload, redact_sensitive_text
-from app.models import AuditLog, AppMeta, Image, RunHistory, Settings, SystemSettings, utcnow
+from app.models import (
+    AuditLog, AppMeta, FafuAuthSession, Image, RunHistory, Settings,
+    SystemSettings, utcnow,
+)
 from app.paths import LIBRARY_DIR, LATEST_DIR, user_image_dir
 from app.schemas import (
     ImageRead,
@@ -58,11 +61,34 @@ def get_or_create_settings(session: Session, user_id: str | None = None) -> Sett
 
 def settings_to_read(session: Session, settings: Settings) -> SettingsRead:
     configured, _ = configuration_state(session, settings)
+    auth = session.get(FafuAuthSession, settings.user_id) if settings.user_id else None
+    if settings.fafu_auth_mode == "auto" and auth is not None:
+        now = utcnow()
+        retry_at = auth.next_refresh_after
+        if retry_at is not None and retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        auth_status = (
+            "reconnect_required" if auth.reconnect_required
+            else "refresh_backoff" if retry_at is not None and retry_at > now
+            else "connected"
+        )
+        auth_mode = "auto"
+    elif settings.fafu_auth_mode == "auto":
+        auth_status = "reconnect_required"
+        auth_mode = "auto"
+    else:
+        auth_status = "manual" if settings.user_token else "unconfigured"
+        auth_mode = "manual" if settings.user_token else None
     return SettingsRead(
         configured=configured,
         version=settings.config_version,
         has_user_token=bool(settings.user_token),
         user_token_masked=mask_secret(settings.user_token),
+        fafu_auth_mode=auth_mode,
+        fafu_auth_status=auth_status,
+        fafu_username_masked=mask_secret(auth.username) if auth_mode == "auto" and auth else None,
+        fafu_last_refresh_at=auth.last_refresh_at if auth_mode == "auto" and auth else None,
+        fafu_last_error=redact_sensitive_text(auth.last_error) if auth_mode == "auto" and auth else None,
         jitter=settings.jitter,
         heartbeat_interval=settings.heartbeat_interval,
         task_keywords=json.loads(settings.task_keywords_json),
@@ -102,8 +128,18 @@ def update_settings(
     if payload.clear_user_token:
         settings.user_token = None
         settings.worker_enabled = False
+        settings.fafu_auth_mode = "manual"
+        if user_id is not None:
+            auth = session.get(FafuAuthSession, user_id)
+            if auth is not None:
+                session.delete(auth)
     elif "user_token" in fields_set and payload.user_token:
         settings.user_token = payload.user_token
+        settings.fafu_auth_mode = "manual"
+        if user_id is not None:
+            auth = session.get(FafuAuthSession, user_id)
+            if auth is not None:
+                session.delete(auth)
 
     for name in (
         "jitter",
@@ -114,6 +150,8 @@ def update_settings(
     ):
         if name in fields_set and values.get(name) is not None:
             setattr(settings, name, values[name])
+    if payload.clear_user_token:
+        settings.worker_enabled = False
     if "task_keywords" in fields_set and payload.task_keywords is not None:
         settings.task_keywords_json = json.dumps(payload.task_keywords, ensure_ascii=False)
     if "selected_image_id" in fields_set:

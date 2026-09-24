@@ -846,6 +846,40 @@ select {
   width: 100%;
 }
 
+.profile-auth-mode {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profile-auth-mode .ant-radio-button-wrapper {
+  display: grid;
+  min-width: 0;
+  min-height: 44px;
+  height: auto;
+  place-items: center;
+  padding: 8px 10px;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+}
+
+.profile-auth-form {
+  margin-top: 20px;
+}
+
+.profile-auth-first-field {
+  margin-top: 16px;
+}
+
+.profile-reconnect-actions {
+  margin-bottom: 20px;
+}
+
+.profile-sms-form {
+  margin-top: 18px;
+}
+
 .session-device-icon {
   display: grid;
   width: 36px;

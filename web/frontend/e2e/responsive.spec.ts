@@ -5,6 +5,11 @@ const settings = {
   version: 3,
   has_user_token: true,
   user_token_masked: '2_t********oken',
+  fafu_auth_mode: 'manual',
+  fafu_auth_status: 'manual',
+  fafu_username_masked: null,
+  fafu_last_refresh_at: null,
+  fafu_last_error: null,
   jitter: 0.00005,
   heartbeat_interval: 900,
   task_keywords: ['晚归'],
@@ -30,6 +35,13 @@ async function mockApi(page: Page): Promise<void> {
       };
     } else if (path === '/api/settings') {
       body = settings;
+    } else if (path === '/api/fafu-auth/start') {
+      body = { attempt_id: 'attempt-1234567890123456', expires_at: new Date(Date.now() + 300_000).toISOString() };
+    } else if (path === '/api/fafu-auth/complete') {
+      body = {
+        ...settings, fafu_auth_mode: 'auto', fafu_auth_status: 'connected',
+        fafu_username_masked: '202***001',
+      };
     } else if (path === '/api/map/config') {
       body = {
         enabled: true,
@@ -102,6 +114,27 @@ async function mockApi(page: Page): Promise<void> {
       contentType: 'application/json',
       body: JSON.stringify(body),
     });
+  });
+}
+
+for (const width of [360, 390]) {
+  test(`${width}px 下 FAFU 账号短信连接表单无溢出`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockApi(page);
+    await page.goto('/profile');
+    await page.getByText('账号登录·自动续期').click();
+    await page.getByLabel('学号', { exact: true }).fill('20260001');
+    await page.getByLabel('CAS 密码').fill('test-password');
+    await page.getByLabel(/已绑定设备 ID/).fill('bound-device');
+    await page.getByRole('button', { name: '登录并发送短信验证码' }).click();
+    await expect(page.getByText('输入短信验证码')).toBeVisible();
+    await page.getByLabel('短信验证码').fill('123456');
+    await page.getByRole('button', { name: '完成连接' }).click();
+    await expect(page.getByText('学号 202***001')).toBeVisible();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
   });
 }
 

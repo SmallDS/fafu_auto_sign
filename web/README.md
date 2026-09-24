@@ -12,7 +12,7 @@ FastAPI、全局签到队列和 Ant Design 前端运行在同一个容器中。�
 - 可选的高德 Web JS Key 与 Security JS Code
 - 反向代理或负载均衡器负责 HTTPS 终止；应用容器内部仍监听 8000 端口
 
-AppSecret、FAFU Token 和高德 Security JS Code 以明文保存在 SQLite 中，读取接口只返回掩码。请保护 `/data` 备份和服务器权限。
+AppSecret、FAFU Token、CAS 密码、WeLink 刷新令牌和高德 Security JS Code 以明文保存在 SQLite 中，读取接口只返回掩码。请保护 `/data` 备份和服务器权限。
 
 ### 微信错误 10003
 
@@ -96,7 +96,14 @@ docker compose -f web/docker-compose.yml up -d --build
 
 ## FAFU 签到与地图
 
-每位用户可直接填写 `2_` Token，或粘贴完整 Base64 Authorization；后端严格校验后只保存末段 Token。任务列表、详情和手工提交直接复用原项目的 FAFU 服务，提交仍严格执行“详情 → 图片上传 → 签到”。
+个人中心的 FAFU 账号支持两种互斥方式：
+
+- 手动填写 `2_` Token，或粘贴完整 Base64 Authorization；后端严格校验后只保存末段 Token。
+- 使用 FAFU 学号、CAS 密码和账号已绑定设备的 `deviceId` 登录；收到短信后在 5 分钟内输入验证码。服务保存凭据和轮换后的 WeLink 刷新令牌，用于后续自动续期。`deviceId` 必须与已绑定设备的 Android ID 精确一致。
+
+新方式连接成功后才替换旧方式；切换到手动方式会删除自动登录凭据。清除 FAFU 配置会删除两种方式的凭据并暂停自动检查。刷新令牌失效时系统只暂停该用户，等待用户在个人中心点击“重新连接”；不会自动发送短信。短信验证码及临时 CAS Cookie 仅保留在进程内，服务重启后需重新发起登录。CAS/WeLink 登录和续期适配自 [Bonger34/fafu-checkin-http](https://github.com/Bonger34/fafu-checkin-http)，许可归属见 [UPSTREAM_LICENSES.md](backend/UPSTREAM_LICENSES.md)。
+
+任务列表、详情和手工提交直接复用原项目的 FAFU 服务，提交仍严格执行“详情 → 图片上传 → 签到”。
 
 FAFU 基础地址固定为原明文 `http://stuhtapi.fafu.edu.cn`。多用户、OAuth 和地图改造没有修改 Authorization 算法、请求头、HTTP 方法、端点、参数位置、上传顺序或签到坐标。
 

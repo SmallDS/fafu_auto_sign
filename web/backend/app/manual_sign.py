@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config_adapter import build_app_config, build_task_query_config
 from app.errors import safe_exception_message
+from app.fafu_auth import FafuAuthError, fafu_auth
 from app.models import RunHistory, User
 from app.repository import (
     configuration_state,
@@ -18,6 +19,7 @@ from app.repository import (
 )
 from app.worker import WorkerManager
 from fafu_auto_sign.client import FAFUClient
+from fafu_auto_sign.client import FAFUAuthExpired
 from fafu_auto_sign.executor import RunStatus, RunSummary, SignExecutor, TaskRunResult
 from fafu_auto_sign.services.notification_service import NotificationService
 from fafu_auto_sign.services.task_service import (
@@ -94,6 +96,19 @@ class ManualSignService:
             )
 
     @staticmethod
+    def _renew_after_expired(session: Session, user_id: str | None) -> bool:
+        if user_id is None:
+            return False
+        settings = _user_settings(session, user_id)
+        if settings.fafu_auth_mode != "auto":
+            return False
+        try:
+            fafu_auth.ensure_token(session, user_id, force_refresh=True)
+        except FafuAuthError:
+            pass
+        return True
+
+    @staticmethod
     def _attempt_summary(
         *,
         task_id: int,
@@ -126,6 +141,11 @@ class ManualSignService:
         self, session: Session, page: int, page_size: int, user_id: str | None = None
     ) -> SignTaskPage:
         settings = _user_settings(session, user_id)
+        if user_id is not None:
+            try:
+                fafu_auth.ensure_token(session, user_id)
+            except FafuAuthError as exc:
+                raise UpstreamUnavailable() from exc
         config = build_task_query_config(settings)
         self._acquire_slot(user_id)
         try:
@@ -133,7 +153,11 @@ class ManualSignService:
                 with FAFUClient(config) as client:
                     return TaskService(client, config).get_pending_task_page(page, page_size)
             except SystemExit as exc:
-                self._disable_worker(session, user_id)
+                if not (
+                    isinstance(exc, FAFUAuthExpired)
+                    and self._renew_after_expired(session, user_id)
+                ):
+                    self._disable_worker(session, user_id)
                 raise UpstreamUnavailable() from exc
             except Exception as exc:
                 raise UpstreamUnavailable() from exc
@@ -144,6 +168,11 @@ class ManualSignService:
         self, session: Session, task_id: int, user_id: str | None = None
     ) -> TaskDetails:
         settings = _user_settings(session, user_id)
+        if user_id is not None:
+            try:
+                fafu_auth.ensure_token(session, user_id)
+            except FafuAuthError as exc:
+                raise UpstreamUnavailable() from exc
         config = build_task_query_config(settings)
         self._acquire_slot(user_id)
         try:
@@ -151,7 +180,11 @@ class ManualSignService:
                 with FAFUClient(config) as client:
                     details = TaskService(client, config).get_task_details_strict(task_id)
             except SystemExit as exc:
-                self._disable_worker(session, user_id)
+                if not (
+                    isinstance(exc, FAFUAuthExpired)
+                    and self._renew_after_expired(session, user_id)
+                ):
+                    self._disable_worker(session, user_id)
                 raise UpstreamUnavailable() from exc
             except TaskDetailsFetchError as exc:
                 raise UpstreamUnavailable() from exc
@@ -178,6 +211,11 @@ class ManualSignService:
             raise ValueError("不能同时设置 GPS 偏移和手动选点")
 
         settings = _user_settings(session, user_id)
+        if user_id is not None:
+            try:
+                fafu_auth.ensure_token(session, user_id)
+            except FafuAuthError as exc:
+                raise UpstreamUnavailable() from exc
         user = session.get(User, user_id) if user_id else None
         system = get_or_create_system_settings(session) if user else None
         config = build_app_config(session, settings, system, user)
@@ -213,7 +251,11 @@ class ManualSignService:
                 )
                 row = save_run_summary(session, attempt, user_id)
                 NotificationService(config).notify_summary(attempt)
-                self._disable_worker(session, user_id)
+                if not (
+                    isinstance(exc, FAFUAuthExpired)
+                    and self._renew_after_expired(session, user_id)
+                ):
+                    self._disable_worker(session, user_id)
                 raise UpstreamUnavailable(row.id) from exc
             except Exception as exc:
                 error = safe_exception_message(exc, "FAFU 请求失败")
@@ -239,7 +281,11 @@ class ManualSignService:
             row = save_run_summary(session, summary, user_id)
             NotificationService(config).notify_summary(summary)
             if summary.status == "fatal":
-                self._disable_worker(session, user_id)
+                if not (
+                    summary.fatal_http_status == 401
+                    and self._renew_after_expired(session, user_id)
+                ):
+                    self._disable_worker(session, user_id)
                 raise UpstreamUnavailable(row.id)
             return row
         finally:

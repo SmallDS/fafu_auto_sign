@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import pytest
 import requests
 
-from fafu_auto_sign.client import FAFUClient
+from fafu_auto_sign.client import FAFUAuthExpired, FAFUClient, FAFUClockError
 from fafu_auto_sign.config import AppConfig
 
 
@@ -294,40 +294,34 @@ class TestSpecialStatusCodes:
     """Test handling of special status codes that terminate the program."""
 
     def test_401_triggers_exit(self, client):
-        """Test that 401 status triggers sys.exit."""
+        """401 preserves CLI exit code and identifies an expired token."""
         mock_response = Mock()
         mock_response.status_code = 401
 
         with patch.object(client.session, "request", return_value=mock_response):
             with patch("fafu_auto_sign.client.generate_headers", return_value={}):
-                with patch("sys.exit") as mock_exit:
-                    with patch.object(client.logger, "error") as mock_error:
+                with patch.object(client.logger, "error") as mock_error:
+                    with pytest.raises(FAFUAuthExpired) as exit_info:
                         client.request("GET", "/test")
-
-                        # Verify error message was logged
-                        mock_error.assert_called_once_with(
-                            "[x] Token已过期，请重新抓包获取并更新配置文件！"
-                        )
-                        # Verify sys.exit was called with code 1
-                        mock_exit.assert_called_once_with(1)
+                    assert exit_info.value.code == 1
+                    mock_error.assert_called_once_with(
+                        "[x] Token已过期，请重新抓包获取并更新配置文件！"
+                    )
 
     def test_408_triggers_exit(self, client):
-        """Test that 408 status triggers sys.exit."""
+        """408 preserves CLI exit code and identifies clock skew."""
         mock_response = Mock()
         mock_response.status_code = 408
 
         with patch.object(client.session, "request", return_value=mock_response):
             with patch("fafu_auto_sign.client.generate_headers", return_value={}):
-                with patch("sys.exit") as mock_exit:
-                    with patch.object(client.logger, "error") as mock_error:
+                with patch.object(client.logger, "error") as mock_error:
+                    with pytest.raises(FAFUClockError) as exit_info:
                         client.request("GET", "/test")
-
-                        # Verify error message was logged
-                        mock_error.assert_called_once_with(
-                            "[x] 系统时间不同步，请校准系统时间！"
-                        )
-                        # Verify sys.exit was called with code 1
-                        mock_exit.assert_called_once_with(1)
+                    assert exit_info.value.code == 1
+                    mock_error.assert_called_once_with(
+                        "[x] 系统时间不同步，请校准系统时间！"
+                    )
 
 
 class TestConvenienceMethods:

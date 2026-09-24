@@ -54,6 +54,13 @@ class SettingsRead(BaseModel):
     version: int
     has_user_token: bool
     user_token_masked: str | None
+    fafu_auth_mode: Literal["manual", "auto"] | None
+    fafu_auth_status: Literal[
+        "unconfigured", "manual", "connected", "refresh_backoff", "reconnect_required"
+    ]
+    fafu_username_masked: str | None
+    fafu_last_refresh_at: datetime | None
+    fafu_last_error: str | None
     jitter: float
     heartbeat_interval: int
     task_keywords: list[str]
@@ -113,6 +120,34 @@ class SettingsUpdate(BaseModel):
         if self.clear_user_token and self.user_token:
             raise ValueError("不能同时设置并清除 Token")
         return self
+
+
+class FafuAuthStart(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+    device_id: str = Field(min_length=1, max_length=128)
+
+    @field_validator("username", "device_id")
+    @classmethod
+    def strip_identifier(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("不能为空")
+        return normalized
+
+
+class FafuAuthComplete(BaseModel):
+    attempt_id: str = Field(min_length=16, max_length=128)
+    code: str = Field(pattern=r"^\d{4,10}$")
+
+
+class FafuAuthCancel(BaseModel):
+    attempt_id: str = Field(min_length=16, max_length=128)
+
+
+class FafuAuthAttemptRead(BaseModel):
+    attempt_id: str
+    expires_at: datetime
 
 
 class SystemSettingsRead(BaseModel):

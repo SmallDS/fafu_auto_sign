@@ -1,6 +1,6 @@
 import type {
   ActionResponse, AdminUser, AuditLog, AuthUser, BootstrapStatus, BootstrapSystemInput,
-  ApiErrorDetail, ImageCategory, ImageRecord, LogsResponse, MapConfig, PageResponse,
+  ApiErrorDetail, FafuAuthAttempt, FafuAuthStartInput, ImageCategory, ImageRecord, LogsResponse, MapConfig, PageResponse,
   ManualSignOptions, Pairing, RunRecord, RunResult, RunTrigger, Settings, SettingsUpdate, SignTaskDetails,
   SignTaskPage, StatusResponse, SystemSettings, SystemSettingsUpdate, UserSession,
   UserStatus,
@@ -101,6 +101,14 @@ export const api = {
   getSettings: (): Promise<Settings> => request('/settings'),
   updateSettings: (settings: SettingsUpdate): Promise<Settings> =>
     request('/settings', { method: 'PUT', body: JSON.stringify(settings) }),
+  startFafuAuth: (input: FafuAuthStartInput): Promise<FafuAuthAttempt> =>
+    request('/fafu-auth/start', { method: 'POST', body: JSON.stringify(input) }),
+  completeFafuAuth: (attemptId: string, code: string): Promise<Settings> =>
+    request('/fafu-auth/complete', { method: 'POST', body: JSON.stringify({ attempt_id: attemptId, code }) }),
+  reconnectFafuAuth: (): Promise<FafuAuthAttempt> =>
+    request('/fafu-auth/reconnect', { method: 'POST' }),
+  cancelFafuAuth: (attemptId: string): Promise<void> =>
+    request('/fafu-auth/cancel', { method: 'POST', body: JSON.stringify({ attempt_id: attemptId }) }),
   getStatus: (): Promise<StatusResponse> => request('/status'),
   getMapConfig: (): Promise<MapConfig> => request('/map/config'),
   pauseWorker: (): Promise<ActionResponse> => request('/worker/pause', { method: 'POST' }),

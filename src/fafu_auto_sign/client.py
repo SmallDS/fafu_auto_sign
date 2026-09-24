@@ -5,7 +5,6 @@
 """
 
 import logging
-import sys
 import time
 from typing import Any
 
@@ -15,6 +14,18 @@ from requests.exceptions import RequestException
 
 from fafu_auto_sign.config import AppConfig
 from fafu_auto_sign.crypto import generate_headers
+
+
+class FAFUAuthExpired(SystemExit):
+    """Preserve CLI exit code while exposing the HTTP reason to Web mode."""
+
+    http_status = 401
+
+
+class FAFUClockError(SystemExit):
+    """The signed request was rejected because of time skew."""
+
+    http_status = 408
 
 
 class FAFUClient:
@@ -106,7 +117,7 @@ class FAFUClient:
                             content="Token已过期，请重新抓包获取并更新配置文件！",
                             success=False,
                         )
-                    sys.exit(1)
+                    raise FAFUAuthExpired(1)
 
                 if response.status_code == 408:
                     self.logger.error("[x] 系统时间不同步，请校准系统时间！")
@@ -120,7 +131,7 @@ class FAFUClient:
                             content="运行脚本的系统时间与标准北京时间不一致，签名校验失败，请校准系统时间！",
                             success=False,
                         )
-                    sys.exit(1)
+                    raise FAFUClockError(1)
 
                 # 根据状态码检查是否应该重试
                 if response.status_code in self.RETRY_STATUS_CODES:

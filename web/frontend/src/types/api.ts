@@ -56,11 +56,30 @@ export interface UserSession {
   current: boolean;
 }
 
+export type FafuAuthMode = 'manual' | 'auto' | null;
+export type FafuAuthStatus = 'unconfigured' | 'manual' | 'connected' | 'refresh_backoff' | 'reconnect_required';
+
+export interface FafuAuthAttempt {
+  attempt_id: string;
+  expires_at: string;
+}
+
+export interface FafuAuthStartInput {
+  username: string;
+  password: string;
+  device_id: string;
+}
+
 export interface Settings {
   configured: boolean;
   version: number;
   has_user_token: boolean;
   user_token_masked: string | null;
+  fafu_auth_mode: FafuAuthMode;
+  fafu_auth_status: FafuAuthStatus;
+  fafu_username_masked: string | null;
+  fafu_last_refresh_at: string | null;
+  fafu_last_error: string | null;
   jitter: number;
   heartbeat_interval: number;
   task_keywords: string[];

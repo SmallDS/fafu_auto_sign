@@ -71,6 +71,9 @@ class Settings(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=True, unique=True, index=True
     )
     user_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fafu_auth_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="manual"
+    )
     jitter: Mapped[float] = mapped_column(Float, nullable=False, default=0.00005)
     heartbeat_interval: Mapped[int] = mapped_column(Integer, nullable=False, default=900)
     log_level: Mapped[str] = mapped_column(String(16), nullable=False, default="INFO")
@@ -92,6 +95,39 @@ class Settings(Base):
     worker_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     config_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class FafuAuthSession(Base):
+    """Per-user CAS/WeLink credentials used to renew the FAFU token."""
+
+    __tablename__ = "fafu_auth_sessions"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    username: Mapped[str] = mapped_column(Text, nullable=False)
+    password: Mapped[str] = mapped_column(Text, nullable=False)
+    device_id: Mapped[str] = mapped_column(Text, nullable=False)
+    we_link_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_fail: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_refresh_after: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_refresh_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reconnect_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    resume_worker_after_reconnect: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

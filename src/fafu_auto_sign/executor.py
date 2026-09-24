@@ -57,6 +57,7 @@ class RunSummary:
     task_results: tuple[TaskRunResult, ...] = ()
     error: str | None = None
     discovered_task_count: int = 0
+    fatal_http_status: int | None = None
 
     @property
     def discovered_count(self) -> int:
@@ -265,6 +266,7 @@ class SignExecutor:
                 config_version=config_version,
                 started_at=started_at,
                 exit_code=exc.code,
+                http_status=getattr(exc, "http_status", None),
                 discovered_count=1,
             )
         except (ConnectionError, RequestException) as exc:
@@ -356,6 +358,7 @@ class SignExecutor:
                 config_version=config_version,
                 started_at=started_at,
                 exit_code=exc.code,
+                http_status=getattr(exc, "http_status", None),
                 discovered_count=discovered_task_count,
                 previous_results=task_results,
             )
@@ -385,6 +388,7 @@ class SignExecutor:
         config_version: int,
         started_at: datetime,
         exit_code: object,
+        http_status: int | None,
         discovered_count: int,
         previous_results: list[TaskRunResult] | None = None,
     ) -> RunSummary:
@@ -410,6 +414,7 @@ class SignExecutor:
             task_results=tuple(results),
             discovered_task_count=discovered_count,
             error=error,
+            fatal_http_status=http_status,
         )
 
     @staticmethod

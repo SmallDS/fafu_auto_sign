@@ -10,7 +10,7 @@ from requests.exceptions import RequestException
 from sqlalchemy.exc import SQLAlchemyError
 
 _SENSITIVE_ASSIGNMENT = re.compile(
-    r"(?i)(authorization|user_token|serverchan(?:_key)?|sendkey|signimg)"
+    r"(?i)(authorization|user_token|serverchan(?:_key)?|sendkey|signimg|password|refresh_token|we_link_token|device_id|cookie)"
     r"[\"']?\s*[:=]\s*[\"']?([^\s,;&\"']+)"
 )
 _URL_QUERY = re.compile(r"(https?://[^\s?]+)\?[^\s]*", re.IGNORECASE)

@@ -28,6 +28,7 @@ from app.auth import ActiveUser, AdminUser, SESSION_COOKIE, check_csrf
 from app.auth_routes import router as auth_router
 from app.database import SessionLocal, get_db, run_migrations
 from app.errors import ConfigurationIncomplete, api_error
+from app.fafu_auth import FafuAuthError, fafu_auth
 from app.image_store import MAX_UPLOAD_FILES, InvalidImage, store_upload
 from app.log_reader import read_logs
 from app.manual_sign import (
@@ -55,6 +56,10 @@ from app.repository import (
     update_settings,
 )
 from app.schemas import (
+    FafuAuthAttemptRead,
+    FafuAuthCancel,
+    FafuAuthComplete,
+    FafuAuthStart,
     HealthResponse,
     ImagePage,
     ImageRead,
@@ -191,7 +196,10 @@ def put_settings(
     payload: SettingsUpdate, user: ActiveUser, session: DbSession
 ) -> SettingsRead:
     try:
-        settings = update_settings(session, payload, user.id)
+        with fafu_auth.user_lock(user.id):
+            settings = update_settings(session, payload, user.id)
+            if payload.clear_user_token or payload.user_token:
+                fafu_auth.invalidate_user(user.id)
     except ValueError as exc:
         session.rollback()
         raise api_error(
@@ -199,6 +207,71 @@ def put_settings(
         ) from exc
     worker.notify_configuration_changed()
     return settings_to_read(session, settings)
+
+
+def _fafu_auth_http_error(exc: FafuAuthError) -> HTTPException:
+    status = (
+        403 if exc.code == "AUTH_REQUIRED"
+        else 404 if exc.code == "AUTH_ATTEMPT_NOT_FOUND"
+        else 429 if exc.code == "AUTH_RATE_LIMITED"
+        else 409 if exc.code in {
+            "AUTH_ATTEMPT_ACTIVE", "AUTH_ATTEMPT_EXPIRED", "AUTH_NOT_CONNECTED",
+            "CAS_SESSION_INVALID",
+            "RECONNECT_REQUIRED", "REFRESH_BACKOFF",
+        }
+        else 422 if exc.code in {
+            "INVALID_CREDENTIALS", "CAPTCHA_FAILED", "SMS_SEND_FAILED",
+            "MFA_FAILED", "DEVICE_MISMATCH", "TOKEN_INVALID", "CLOCK_ERROR",
+            "CREDENTIALS_REQUIRED", "MFA_INPUT_INVALID",
+        }
+        else 502
+    )
+    return api_error(status, exc.code, exc.message)
+
+
+@app.post("/api/fafu-auth/start", response_model=FafuAuthAttemptRead)
+def start_fafu_auth(
+    payload: FafuAuthStart, user: ActiveUser
+) -> FafuAuthAttemptRead:
+    try:
+        attempt = fafu_auth.start(
+            user.id, payload.username, payload.password, payload.device_id
+        )
+    except FafuAuthError as exc:
+        raise _fafu_auth_http_error(exc) from exc
+    return FafuAuthAttemptRead(attempt_id=attempt.id, expires_at=attempt.expires_at)
+
+
+@app.post("/api/fafu-auth/reconnect", response_model=FafuAuthAttemptRead)
+def reconnect_fafu_auth(
+    user: ActiveUser, session: DbSession
+) -> FafuAuthAttemptRead:
+    try:
+        attempt = fafu_auth.reconnect(session, user.id)
+    except FafuAuthError as exc:
+        raise _fafu_auth_http_error(exc) from exc
+    return FafuAuthAttemptRead(attempt_id=attempt.id, expires_at=attempt.expires_at)
+
+
+@app.post("/api/fafu-auth/complete", response_model=SettingsRead)
+def complete_fafu_auth(
+    payload: FafuAuthComplete, user: ActiveUser, session: DbSession
+) -> SettingsRead:
+    try:
+        settings = fafu_auth.complete(session, user.id, payload.attempt_id, payload.code)
+    except FafuAuthError as exc:
+        session.rollback()
+        raise _fafu_auth_http_error(exc) from exc
+    worker.notify_configuration_changed()
+    return settings_to_read(session, settings)
+
+
+@app.post("/api/fafu-auth/cancel", status_code=204)
+def cancel_fafu_auth(payload: FafuAuthCancel, user: ActiveUser) -> None:
+    try:
+        fafu_auth.cancel(user.id, payload.attempt_id)
+    except FafuAuthError as exc:
+        raise _fafu_auth_http_error(exc) from exc
 
 
 @app.get("/api/map/config", response_model=MapConfigRead)

@@ -13,7 +13,8 @@ from sqlalchemy import select
 from app.config_adapter import build_app_config
 from app.database import SessionLocal
 from app.errors import ConfigurationIncomplete, safe_exception_message
-from app.models import Image, RunHistory, Settings, SignJob, SystemSettings, User, utcnow
+from app.fafu_auth import FafuAuthError, fafu_auth
+from app.models import FafuAuthSession, Image, RunHistory, Settings, SignJob, SystemSettings, User, utcnow
 from app.repository import configuration_state, image_path, save_run_summary
 from fafu_auto_sign.executor import SignExecutor
 from fafu_auto_sign.services.notification_service import NotificationService
@@ -287,6 +288,7 @@ class WorkerManager:
                     or user.status != "active"
                 ):
                     raise ConfigurationIncomplete("用户不可调度")
+                fafu_auth.ensure_token(session, user_id)
                 version = settings.config_version
                 interval = settings.heartbeat_interval
                 config = build_app_config(session, settings, system, user)
@@ -298,6 +300,23 @@ class WorkerManager:
                     capture_fatal=True,
                     should_stop=self._is_stopping,
                 )
+            recovered_auth = False
+            auth_retry_pending = False
+            if summary.fatal_http_status == 401 and user_id:
+                try:
+                    with SessionLocal() as renewal_session:
+                        auth_settings = renewal_session.scalar(
+                            select(Settings).where(Settings.user_id == user_id)
+                        )
+                        if auth_settings and auth_settings.fafu_auth_mode == "auto":
+                            fafu_auth.ensure_token(
+                                renewal_session, user_id, force_refresh=True
+                            )
+                            recovered_auth = True
+                except FafuAuthError as exc:
+                    auth_retry_pending = exc.code in {
+                        "REFRESH_BACKOFF", "UPSTREAM_UNAVAILABLE",
+                    }
             NotificationService(config).notify_summary(summary)
             with SessionLocal() as session:
                 save_run_summary(session, summary, user_id)
@@ -305,10 +324,18 @@ class WorkerManager:
                     select(Settings).where(Settings.user_id == user_id)
                 )
                 current_job = session.get(SignJob, job_id)
-                if summary.status == "fatal" and settings:
+                if summary.status == "fatal" and settings and not (
+                    recovered_auth or auth_retry_pending
+                ):
                     settings.worker_enabled = False
                 if settings:
-                    settings.next_run_at = utcnow() + timedelta(seconds=interval)
+                    auth = session.get(FafuAuthSession, user_id) if user_id else None
+                    retry_at = _aware(auth.next_refresh_after) if auth else None
+                    settings.next_run_at = (
+                        utcnow() + timedelta(seconds=2) if recovered_auth
+                        else retry_at if auth_retry_pending and retry_at
+                        else utcnow() + timedelta(seconds=interval)
+                    )
                 for image in session.scalars(
                     select(Image).where(
                         Image.user_id == user_id, Image.purpose == "latest"
@@ -323,6 +350,21 @@ class WorkerManager:
         except ConfigurationIncomplete as exc:
             logger.warning("用户调度配置不完整")
             self._finish_failed_job(job_id, str(exc), create_history=False)
+        except FafuAuthError as exc:
+            logger.warning("用户 FAFU 会话暂不可用: %s", exc.code)
+            self._finish_failed_job(job_id, exc.message, create_history=False)
+            if user_id:
+                with SessionLocal() as session:
+                    settings = session.scalar(
+                        select(Settings).where(Settings.user_id == user_id)
+                    )
+                    auth = session.get(FafuAuthSession, user_id)
+                    if settings and settings.worker_enabled:
+                        retry_at = _aware(auth.next_refresh_after) if auth else None
+                        settings.next_run_at = retry_at or (
+                            utcnow() + timedelta(seconds=settings.heartbeat_interval)
+                        )
+                        session.commit()
         except Exception as exc:
             logger.error("后台签到执行失败")
             if config is not None:
