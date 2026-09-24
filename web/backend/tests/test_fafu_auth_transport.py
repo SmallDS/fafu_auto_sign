@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from email.message import Message
+from types import SimpleNamespace
+from urllib.parse import quote
 from urllib.request import Request
 
 import pytest
@@ -67,3 +69,56 @@ def test_cross_host_redirect_drops_cas_cookie() -> None:
     assert redirected.get_header("Cookie") is None
     assert redirected.get_header("Authorization") is None
     assert redirected.get_header("Referer") is None
+
+
+def test_cas_service_is_passed_to_sms_and_mfa_without_welink_host_restriction(
+    monkeypatch,
+) -> None:
+    auth_url = transport.CAS_BASE + "/oauth2.0/authorize?client_id=test"
+    service = "https://auth.fafu.edu.cn/authserver/return"
+    login_url = transport.CAS_BASE + "/reAuthCheck/reAuthLoginView.do?service=" + quote(service, safe="")
+    calls = []
+
+    def reply(url: str, body: bytes) -> transport._Response:
+        return transport._Response(200, body, url, Message())
+
+    def fake_send(url, data=None, **kwargs):
+        if url.endswith("/enterprise/auth/info"):
+            return reply(url, ('{"data":{"thirdLoginUrl":"' + auth_url + '"}}').encode())
+        assert url.endswith("/v7/callback/LoginReg")
+        return reply(url, b'{"refresh_token":"refresh-token"}')
+
+    def fake_cas(url, data=None, **kwargs):
+        calls.append((url, data))
+        if url == auth_url:
+            return reply(url, b'<input name="pwdEncryptSalt" value="salt">')
+        if "/checkNeedCaptcha.htl?" in url:
+            return reply(url, b'{"isNeed":false}')
+        if url == transport.CAS_BASE + "/login":
+            return reply(login_url, b"")
+        if url.endswith("/dynamicCode/getDynamicCodeByReauth.do"):
+            return reply(url, b'{"res":"success"}')
+        if url.endswith("/reAuthCheck/reAuthSubmit.do"):
+            return reply(url, b"reAuth_success")
+        if url.startswith(transport.CAS_BASE + "/login?service="):
+            return reply(transport.MAG_BASE + "/callback?code=oauth-code", b"")
+        raise AssertionError(url)
+
+    monkeypatch.setattr(transport, "_send", fake_send)
+    monkeypatch.setattr(transport, "_cas", fake_cas)
+    monkeypatch.setattr(transport, "_aes_cbc", lambda *args: "encrypted")
+    monkeypatch.setattr(transport, "_cookie_token", lambda headers: "welink-token")
+    monkeypatch.setattr(transport, "_rsa_tenant", lambda: "tenant")
+    monkeypatch.setattr(transport.http.cookiejar, "CookieJar", lambda: [
+        SimpleNamespace(domain="auth.fafu.edu.cn", name="CASTGC", value="cas-cookie")
+    ])
+    monkeypatch.setattr(transport.urllib.request, "build_opener", lambda *args: object())
+    client = transport.FafuAuthTransport()
+    monkeypatch.setattr(client, "exchange_welink", lambda token, device: "2_fafu-token")
+
+    assert client.begin("student", "password") == (service, "CASTGC=cas-cookie")
+    assert any(url.endswith("/dynamicCode/getDynamicCodeByReauth.do") for url, _ in calls)
+    assert client.complete(service, "CASTGC=cas-cookie", "123456", "device") == (
+        "welink-token", "refresh-token", "2_fafu-token"
+    )
+    assert any(url.endswith("/reAuthCheck/reAuthSubmit.do") for url, _ in calls)

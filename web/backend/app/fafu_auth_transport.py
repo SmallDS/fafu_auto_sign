@@ -379,10 +379,6 @@ class FafuAuthTransport:
                 raise FafuAuthTransportError("UPSTREAM_UNAVAILABLE", "学校登录服务暂时不可用")
             raise FafuAuthTransportError("INVALID_CREDENTIALS", "学校账号登录失败，请检查学号和密码")
         service = urllib.parse.unquote(match_service.group(1))
-        _check_url(service)
-        service_parts = urllib.parse.urlsplit(service)
-        if service_parts.scheme != "https" or service_parts.hostname != "api.welink.huaweicloud.com":
-            raise FafuAuthTransportError("UPSTREAM_URL_INVALID", "登录回调地址无效")
         send = _cas(
             CAS_BASE + "/dynamicCode/getDynamicCodeByReauth.do",
             {"userName": username, "authCodeTypeName": "reAuthDynamicCodeType"},
@@ -402,10 +398,6 @@ class FafuAuthTransport:
     def complete(self, service: str, cookie: str, code: str, device_id: str) -> tuple[str, str, str]:
         if not service or not cookie or not code or not device_id:
             raise FafuAuthTransportError("MFA_INPUT_INVALID", "验证码或登录会话不完整")
-        _check_url(service)
-        service_parts = urllib.parse.urlsplit(service)
-        if service_parts.scheme != "https" or service_parts.hostname != "api.welink.huaweicloud.com":
-            raise FafuAuthTransportError("UPSTREAM_URL_INVALID", "登录回调地址无效")
         ref = CAS_BASE + "/reAuthCheck/reAuthLoginView.do?isMultifactor=true&service=" + urllib.parse.quote(service, safe="")
         mfa = _cas(
             CAS_BASE + "/reAuthCheck/reAuthSubmit.do",
